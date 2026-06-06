@@ -1,0 +1,269 @@
+import fs from 'fs/promises';
+import path from 'path';
+import { MongoClient } from 'mongodb';
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
+const LOGS_PATH = path.join(DATA_DIR, 'logs.json');
+
+const DEFAULT_SETTINGS = {
+  shopifyShop: (process.env.SHOPIFY_SHOP_DOMAIN || '').trim(),
+  shopifyAccessToken: (process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim(),
+  goldApiKey: (process.env.GOLD_API_KEY || '').trim(),
+  currency: 'INR',
+  defaultKarat: '18K',
+  weightNamespace: 'custom',
+  weightKey: 'gold_weight',
+  karatNamespace: 'custom',
+  karatKey: 'gold_karat',
+  diamondNamespace: 'custom',
+  diamondKey: 'd_price',
+  gstPercentage: 3,
+  makingChargePerGram: 0,
+  makingChargeFixed: 0,
+  fixedMarkup: 0,
+  markupPercentage: 0,
+  autoSyncEnabled: false,
+  syncInterval: 5,
+};
+
+let client = null;
+let db = null;
+
+async function connectToDatabase() {
+  const uri = process.env.DB_URI;
+  if (!uri) {
+    // If DB_URI is not configured, return null to fallback to local files
+    return null;
+  }
+  
+  if (db) return db;
+
+  try {
+    if (!client) {
+      client = new MongoClient(uri);
+      await client.connect();
+    }
+    db = client.db('GoldSync'); // Connects to the GoldSync database
+    return db;
+  } catch (error) {
+    console.error('Failed to connect to MongoDB, falling back to file storage:', error);
+    return null;
+  }
+}
+
+async function ensureDirectory() {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+  } catch {
+    // Ignore if directory exists
+  }
+}
+
+export async function getSettings() {
+  const mongoDb = await connectToDatabase();
+  let saved = {};
+  
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('settings');
+      const doc = await collection.findOne({ _id: 'app_settings' });
+      if (doc) {
+        saved = doc;
+        delete saved._id; // Clean MongoDB metadata
+      }
+    } catch (error) {
+      console.error('Failed to get settings from MongoDB:', error);
+    }
+  } else {
+    await ensureDirectory();
+    try {
+      const data = await fs.readFile(SETTINGS_PATH, 'utf-8');
+      saved = JSON.parse(data);
+    } catch {
+      // Fallback if local file does not exist
+    }
+  }
+  
+  return {
+    ...DEFAULT_SETTINGS,
+    ...saved,
+    shopifyShop: (process.env.SHOPIFY_SHOP_DOMAIN || '').trim(),
+    shopifyAccessToken: (process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim(),
+    goldApiKey: (process.env.GOLD_API_KEY || '').trim(),
+  };
+}
+
+export async function saveSettings(newSettings) {
+  // Clone and delete credentials to prevent them from being written to settings.json or MongoDB settings
+  const persistableSettings = { ...newSettings };
+  delete persistableSettings.shopifyShop;
+  delete persistableSettings.shopifyAccessToken;
+  delete persistableSettings.goldApiKey;
+  
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('settings');
+      await collection.updateOne(
+        { _id: 'app_settings' },
+        { $set: persistableSettings },
+        { upsert: true }
+      );
+    } catch (error) {
+      console.error('Failed to save settings to MongoDB:', error);
+    }
+  } else {
+    await ensureDirectory();
+    await fs.writeFile(SETTINGS_PATH, JSON.stringify(persistableSettings, null, 2), 'utf-8');
+  }
+  
+  const currentSettings = await getSettings();
+  return {
+    ...currentSettings,
+    ...persistableSettings,
+  };
+}
+
+export async function getLogs() {
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('logs');
+      const result = await collection.find({}).sort({ timestamp: -1 }).limit(100).toArray();
+      return result.map(doc => {
+        const log = { ...doc };
+        delete log._id; // Clean MongoDB metadata
+        return log;
+      });
+    } catch (error) {
+      console.error('Failed to get logs from MongoDB:', error);
+      return [];
+    }
+  }
+  
+  await ensureDirectory();
+  try {
+    const data = await fs.readFile(LOGS_PATH, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    await fs.writeFile(LOGS_PATH, '[]', 'utf-8');
+    return [];
+  }
+}
+
+export async function addLog(log) {
+  const newLog = {
+    ...log,
+    id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    timestamp: new Date().toISOString(),
+  };
+  
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('logs');
+      await collection.insertOne(newLog);
+      const returnLog = { ...newLog };
+      delete returnLog._id;
+      return returnLog;
+    } catch (error) {
+      console.error('Failed to add log to MongoDB:', error);
+    }
+  }
+  
+  await ensureDirectory();
+  const logs = await getLogs();
+  const updatedLogs = [newLog, ...logs].slice(0, 100);
+  await fs.writeFile(LOGS_PATH, JSON.stringify(updatedLogs, null, 2), 'utf-8');
+  return newLog;
+}
+
+export async function getSchedulerState() {
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('scheduler_state');
+      const doc = await collection.findOne({ _id: 'state' });
+      if (doc) {
+        delete doc._id;
+        return doc;
+      }
+      return { lastSyncTime: 0 };
+    } catch (error) {
+      console.error('Failed to get scheduler state from MongoDB:', error);
+      return { lastSyncTime: 0 };
+    }
+  }
+  
+  const schedulerStatePath = path.join(DATA_DIR, 'scheduler_state.json');
+  try {
+    const data = await fs.readFile(schedulerStatePath, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return { lastSyncTime: 0 };
+  }
+}
+
+export async function saveSchedulerState(state) {
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('scheduler_state');
+      await collection.updateOne(
+        { _id: 'state' },
+        { $set: state },
+        { upsert: true }
+      );
+      return state;
+    } catch (error) {
+      console.error('Failed to save scheduler state to MongoDB:', error);
+    }
+  }
+  
+  const schedulerStatePath = path.join(DATA_DIR, 'scheduler_state.json');
+  await ensureDirectory();
+  await fs.writeFile(schedulerStatePath, JSON.stringify(state, null, 2), 'utf-8');
+  return state;
+}
+
+export async function getSyncStatus() {
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('sync_status');
+      const doc = await collection.findOne({ _id: 'status' });
+      if (doc) {
+        const result = { ...doc };
+        delete result._id;
+        return result;
+      }
+      return { syncing: false, lastResult: null };
+    } catch (error) {
+      console.error('Failed to get sync status from MongoDB:', error);
+      return { syncing: false, lastResult: null };
+    }
+  }
+  // Fallback: use a module-level variable for local dev
+  return global.__syncStatus || { syncing: false, lastResult: null };
+}
+
+export async function setSyncStatus(status) {
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('sync_status');
+      await collection.updateOne(
+        { _id: 'status' },
+        { $set: status },
+        { upsert: true }
+      );
+      return status;
+    } catch (error) {
+      console.error('Failed to set sync status in MongoDB:', error);
+    }
+  }
+  // Fallback for local dev without DB
+  global.__syncStatus = { ...global.__syncStatus, ...status };
+  return status;
+}

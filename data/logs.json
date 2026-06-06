@@ -1,0 +1,35 @@
+[
+  {
+    "status": "success",
+    "type": "bulk",
+    "details": "Auto Sync: successfully updated 23 variant prices.",
+    "productsUpdated": 23,
+    "id": "log_1780742792557_ba0xm5yio",
+    "timestamp": "2026-06-06T10:46:32.557Z"
+  },
+  {
+    "status": "success",
+    "type": "bulk",
+    "details": "Auto Sync: successfully updated 43 variant prices.",
+    "productsUpdated": 43,
+    "id": "log_1780742745951_rlrscolcm",
+    "timestamp": "2026-06-06T10:45:45.951Z"
+  },
+  {
+    "status": "success",
+    "type": "bulk",
+    "details": "Auto Sync: successfully updated 1 variant prices.",
+    "productsUpdated": 1,
+    "id": "log_1780741518503_q9ij5gx57",
+    "timestamp": "2026-06-06T10:25:18.503Z"
+  },
+  {
+    "status": "success",
+    "type": "single",
+    "details": "Updated 'Halo Asscher Lab Grown Diamond Engagement Ring - Plain Band' (White gold / 1ct / 14K) price from $12295.64 to $10467.27",
+    "productsUpdated": 1,
+    "id": "log_1780741515591_w9tz2nen3",
+    "timestamp": "2026-06-06T10:25:15.591Z",
+    "_id": "6a23f58b6b40e4ec48e5e5b7"
+  }
+]
