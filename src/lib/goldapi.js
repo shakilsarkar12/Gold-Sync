@@ -34,8 +34,7 @@ export async function fetchLiveGoldRates(forceRefresh = false) {
   if (
     !forceRefresh &&
     ratesCache &&
-    ratesCache.currency === currency &&
-    now - ratesCache.timestamp < CACHE_TTL
+    ratesCache.currency === currency
   ) {
     return ratesCache.data;
   }

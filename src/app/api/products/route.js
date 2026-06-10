@@ -9,6 +9,7 @@ import {
 } from '@/lib/shopify';
 import { calculateVariantPrice, runProductSync } from '@/lib/sync';
 import { initScheduler } from '@/lib/scheduler';
+import { setSyncStatus } from '@/lib/db';
 
 export async function GET() {
   try {
@@ -200,7 +201,17 @@ export async function POST(request) {
       let failCount = 0;
       const errors = [];
 
-      for (const item of items) {
+      await setSyncStatus({
+        syncing: true,
+        startedAt: new Date().toISOString(),
+        isAuto: false,
+        totalItems: items.length,
+        completedItems: 0,
+        lastResult: null
+      });
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
         try {
           // 1. Save metafields if provided
           if (item.metafields) {
@@ -234,6 +245,15 @@ export async function POST(request) {
           failCount++;
           errors.push(`${item.productTitle} (${item.variantTitle}): ${err.message}`);
         }
+        
+        if ((i + 1) % 5 === 0 || i === items.length - 1) {
+          await setSyncStatus({
+            syncing: true,
+            isAuto: false,
+            totalItems: items.length,
+            completedItems: i + 1,
+          });
+        }
       }
 
       if (successCount > 0) {
@@ -244,6 +264,17 @@ export async function POST(request) {
           productsUpdated: successCount,
         });
       }
+
+      await setSyncStatus({
+        syncing: false,
+        completedAt: new Date().toISOString(),
+        lastResult: {
+          success: failCount === 0,
+          successCount,
+          failCount,
+          isAuto: false,
+        },
+      });
 
       return NextResponse.json({
         success: failCount === 0,

@@ -11,6 +11,7 @@ import { CheckCircle, XCircle, Loader2, Zap } from 'lucide-react';
 export default function AutoSyncBanner() {
   const [phase, setPhase] = useState('idle'); // 'idle' | 'syncing' | 'done-success' | 'done-error'
   const [lastResult, setLastResult] = useState(null);
+  const [syncData, setSyncData] = useState(null);
   const prevSyncing = useRef(false);
   const hideTimer = useRef(null);
 
@@ -26,6 +27,7 @@ export default function AutoSyncBanner() {
         // Clear any pending hide timer
         if (hideTimer.current) clearTimeout(hideTimer.current);
         setPhase('syncing');
+        setSyncData(data);
         prevSyncing.current = true;
       } else if (prevSyncing.current && !isSyncing && data.lastResult) {
         // Transition: was syncing, now done
@@ -102,7 +104,14 @@ export default function AutoSyncBanner() {
               style={{ animation: 'spin 0.9s linear infinite', flexShrink: 0 }}
             />
             <Zap size={13} style={{ flexShrink: 0, opacity: 0.75 }} />
-            <span>Auto Sync Running…</span>
+            <span>
+              {syncData?.isAuto ? 'Auto Sync Running…' : 'Manual Sync Running…'}
+              {syncData?.totalItems > 0 ? (
+                <span style={{ marginLeft: '4px', opacity: 0.85, fontWeight: 'normal' }}>
+                  ({Math.round((syncData.completedItems / syncData.totalItems) * 100)}%)
+                </span>
+              ) : null}
+            </span>
           </>
         )}
         {isSuccess && (

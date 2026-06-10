@@ -130,7 +130,14 @@ export async function runProductSync(isAuto = false) {
   }
 
   // Mark sync as running in DB so the frontend can poll and show the banner
-  await setSyncStatus({ syncing: true, startedAt: new Date().toISOString(), lastResult: null });
+  await setSyncStatus({ 
+    syncing: true, 
+    startedAt: new Date().toISOString(), 
+    lastResult: null, 
+    isAuto,
+    totalItems: 0,
+    completedItems: 0
+  });
   const rates = await fetchLiveGoldRates(true);
   
   // 2. Fetch all products from Shopify
@@ -200,12 +207,21 @@ export async function runProductSync(isAuto = false) {
     return { success: true, successCount: 0, failCount: 0, errors: [] };
   }
   
+  // Update total items
+  await setSyncStatus({
+    syncing: true,
+    isAuto,
+    totalItems: outOfSyncItems.length,
+    completedItems: 0
+  });
+
   // 4. Update Shopify variant prices in bulk
   let successCount = 0;
   let failCount = 0;
   const errors = [];
   
-  for (const item of outOfSyncItems) {
+  for (let i = 0; i < outOfSyncItems.length; i++) {
+    const item = outOfSyncItems[i];
     try {
       // Save current metafield values to Shopify before updating price
       if (item.metafields) {
@@ -229,6 +245,16 @@ export async function runProductSync(isAuto = false) {
     } catch (error) {
       failCount++;
       errors.push(`${item.productTitle} (${item.variantTitle}): ${error.message}`);
+    }
+    
+    // Update progress periodically
+    if ((i + 1) % 5 === 0 || i === outOfSyncItems.length - 1) {
+      await setSyncStatus({
+        syncing: true,
+        isAuto,
+        totalItems: outOfSyncItems.length,
+        completedItems: i + 1,
+      });
     }
   }
   
