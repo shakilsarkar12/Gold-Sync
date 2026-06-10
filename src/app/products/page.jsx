@@ -24,6 +24,9 @@ export default function ProductsPage() {
   
   // State for product-level edits: { [productId]: { weight, karat, diamondPrice } }
   const [editedMetafields, setEditedMetafields] = useState({});
+  // State for variant-level edits: { [variantId]: { weight, karat, shape, crt, color } }
+  const [editedVariantMetafields, setEditedVariantMetafields] = useState({});
+  const [savingVariantMetafieldsId, setSavingVariantMetafieldsId] = useState(null);
 
   const fetchProducts = useCallback(async () => {
     try {
@@ -36,16 +39,29 @@ export default function ProductsPage() {
         setCurrency(data.goldRates.currency || 'USD');
       }
 
-      // Initialize inline edit state at the product level
+      // Initialize inline edit state at both product and variant level
       const initialEdits = {};
+      const initialVariantEdits = {};
       (data.products || []).forEach((p) => {
         initialEdits[p.id] = {
           weight: p.weightValue !== null ? p.weightValue.toString() : '',
           karat: p.karatValue || '',
           diamondPrice: p.diamondPrice !== undefined ? p.diamondPrice.toString() : '0',
         };
+        (p.variants || []).forEach((v) => {
+          initialVariantEdits[v.id] = {
+            weight: v.weightValue !== null ? v.weightValue.toString() : '',
+            karat: v.karatValue || '',
+            // Normalize shape to capitalized to match dropdown option values
+            shape: v.shapeValue ? (v.shapeValue.trim().charAt(0).toUpperCase() + v.shapeValue.trim().slice(1).toLowerCase()) : '',
+            crt: v.crtValue !== null ? v.crtValue.toString() : '',
+            // Normalize color to uppercase for consistent display (D, E-F, G-H)
+            color: v.colorValue ? v.colorValue.trim().toUpperCase() : '',
+          };
+        });
       });
       setEditedMetafields(initialEdits);
+      setEditedVariantMetafields(initialVariantEdits);
     } catch (error) {
       showToast(error.message || 'Error loading products', 'error');
     } finally {
@@ -63,6 +79,16 @@ export default function ProductsPage() {
       ...prev,
       [productId]: {
         ...prev[productId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleVariantMetafieldChange = (variantId, field, value) => {
+    setEditedVariantMetafields((prev) => ({
+      ...prev,
+      [variantId]: {
+        ...prev[variantId],
         [field]: value,
       },
     }));
@@ -99,8 +125,43 @@ export default function ProductsPage() {
     }
   };
 
+  const handleSaveVariantMetafields = async (product, variant) => {
+    setSavingVariantMetafieldsId(variant.id);
+    const edits = editedVariantMetafields[variant.id];
+    
+    try {
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_metafields',
+          productId: product.id,
+          variantId: variant.id,
+          weight: edits.weight,
+          karat: edits.karat,
+          shape: edits.shape,
+          crt: edits.crt,
+          color: edits.color,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to update variant metafields');
+      }
+
+      showToast(`Variant metafields for ${variant.title} updated successfully`, 'success');
+      await fetchProducts();
+    } catch (error) {
+      showToast(error.message || 'Error updating variant metafields', 'error');
+    } finally {
+      setSavingVariantMetafieldsId(null);
+    }
+  };
+
   const handleSyncVariant = async (product, variant) => {
     setSyncingId(variant.id);
+    const vEdits = editedVariantMetafields[variant.id] || {};
     try {
       const res = await fetch('/api/products', {
         method: 'POST',
@@ -113,6 +174,14 @@ export default function ProductsPage() {
           variantTitle: variant.title,
           newPrice: variant.calculatedPrice,
           oldPrice: variant.price,
+          // Also push any edited metafield values to Shopify
+          metafields: {
+            weight: vEdits.weight || '',
+            karat: vEdits.karat || '',
+            shape: vEdits.shape || '',
+            crt: vEdits.crt || '',
+            color: vEdits.color || '',
+          },
         }),
       });
 
@@ -121,7 +190,7 @@ export default function ProductsPage() {
         throw new Error(data.error || 'Failed to sync variant price');
       }
 
-      showToast(`Synced price for ${product.title} (${variant.title})`, 'success');
+      showToast(`Synced price + metafields for ${variant.title}`, 'success');
       await fetchProducts();
     } catch (error) {
       showToast(error.message || 'Error syncing price', 'error');
@@ -135,6 +204,7 @@ export default function ProductsPage() {
     products.forEach((p) => {
       p.variants.forEach((v) => {
         if (v.isGoldVariant && v.outOfSync) {
+          const vEdits = editedVariantMetafields[v.id] || {};
           outOfSyncItems.push({
             productId: p.id,
             productTitle: p.title,
@@ -142,6 +212,13 @@ export default function ProductsPage() {
             variantTitle: v.title,
             newPrice: v.calculatedPrice,
             oldPrice: v.price,
+            metafields: {
+              weight: vEdits.weight || '',
+              karat: vEdits.karat || '',
+              shape: vEdits.shape || '',
+              crt: vEdits.crt || '',
+              color: vEdits.color || '',
+            },
           });
         }
       });
@@ -166,7 +243,7 @@ export default function ProductsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed bulk sync');
 
-      showToast(`Bulk sync complete. Updated ${data.successCount} variant prices.`, 'success');
+      showToast(`Bulk sync complete. Updated ${data.successCount} variant prices + metafields.`, 'success');
       await fetchProducts();
     } catch (error) {
       showToast(error.message || 'Error executing bulk sync', 'error');
@@ -266,14 +343,16 @@ export default function ProductsPage() {
           <table className="custom-table">
             <thead>
               <tr>
-                <th style={{ width: '260px' }}>Product & Variant Title</th>
+                <th style={{ width: '220px' }}>Product & Variant Title</th>
                 <th>Gold Weight (g)</th>
                 <th>Karat</th>
-                <th>Diamond Price</th>
+                <th>Diamond Shape</th>
+                <th>Diamond Carats (crt)</th>
+                <th>Diamond Color</th>
                 <th>Current Shopify</th>
                 <th>Calculated Price</th>
                 <th>Status</th>
-                <th style={{ textAlign: 'right', width: '180px' }}>Actions</th>
+                <th style={{ textAlign: 'right', width: '200px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -315,7 +394,7 @@ export default function ProductsPage() {
                         <input
                           type="number"
                           className="form-input"
-                          style={{ width: '85px', padding: '0.35rem 0.5rem', textAlign: 'center', fontSize: '0.85rem', borderColor: 'var(--gold-primary)' }}
+                          style={{ width: '80px', padding: '0.35rem 0.5rem', textAlign: 'center', fontSize: '0.85rem', borderColor: 'var(--gold-primary)' }}
                           placeholder="0.00"
                           min="0"
                           step="0.01"
@@ -342,18 +421,21 @@ export default function ProductsPage() {
                         </select>
                       </td>
 
-                      {/* Product Diamond Price Input */}
-                      <td>
-                        <input
-                          type="number"
-                          className="form-input"
-                          style={{ width: '90px', padding: '0.35rem 0.5rem', textAlign: 'center', fontSize: '0.85rem', borderColor: 'var(--gold-primary)' }}
-                          placeholder="0"
-                          min="0"
-                          step="1"
-                          value={edits.diamondPrice}
-                          onChange={(e) => handleMetafieldChange(product.id, 'diamondPrice', e.target.value)}
-                        />
+                      {/* Product Diamond Price Input (colSpan=3 spans shape, carat, color) */}
+                      <td colSpan={3}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Diamond Price fallback:</span>
+                          <input
+                            type="number"
+                            className="form-input"
+                            style={{ width: '90px', padding: '0.35rem 0.5rem', textAlign: 'center', fontSize: '0.85rem', borderColor: 'var(--gold-primary)' }}
+                            placeholder="0"
+                            min="0"
+                            step="1"
+                            value={edits.diamondPrice}
+                            onChange={(e) => handleMetafieldChange(product.id, 'diamondPrice', e.target.value)}
+                          />
+                        </div>
                       </td>
 
                       {/* Current Shopify Price (Summary) */}
@@ -395,128 +477,222 @@ export default function ProductsPage() {
                     </tr>
 
                     {/* Variant Sub-rows */}
-                    {product.variants.map((variant) => (
-                      <tr key={variant.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
-                        {/* Column 1: Variant Title / SKU */}
-                        <td style={{ paddingLeft: '2.5rem' }}>
-                          <div style={{ fontWeight: 500, fontSize: '0.85rem' }}>
-                            {variant.title}
-                          </div>
-                          {variant.sku && (
-                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                              SKU: {variant.sku}
+                    {product.variants.map((variant) => {
+                      const vEdits = editedVariantMetafields[variant.id] || { weight: '', karat: '', shape: '', crt: '', color: '' };
+                      const hasVariantChanges =
+                        vEdits.weight !== (variant.weightValue?.toString() || '') ||
+                        vEdits.karat !== (variant.karatValue || '') ||
+                        vEdits.shape !== (variant.shapeValue || '') ||
+                        vEdits.crt !== (variant.crtValue?.toString() || '') ||
+                        vEdits.color !== (variant.colorValue || '');
+
+                      return (
+                        <tr key={variant.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
+                          {/* Column 1: Variant Title / SKU */}
+                          <td style={{ paddingLeft: '2.5rem' }}>
+                            <div style={{ fontWeight: 500, fontSize: '0.85rem' }}>
+                              {variant.title}
                             </div>
-                          )}
-                        </td>
+                            {variant.sku && (
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                SKU: {variant.sku}
+                              </div>
+                            )}
+                          </td>
 
-                        {/* Gold Weight - Inherited */}
-                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
-                          {product.weightValue ? `${product.weightValue}g` : '-'}
-                        </td>
+                          {/* Gold Weight Input */}
+                          <td>
+                            <input
+                              type="number"
+                              className="form-input"
+                              style={{ width: '75px', padding: '0.3rem 0.4rem', textAlign: 'center', fontSize: '0.85rem' }}
+                              placeholder={product.weightValue !== null ? `${product.weightValue}g` : '0.00'}
+                              min="0"
+                              step="0.01"
+                              value={vEdits.weight}
+                              onChange={(e) => handleVariantMetafieldChange(variant.id, 'weight', e.target.value)}
+                            />
+                          </td>
 
-                        {/* Karat - Inherited or title parsed */}
-                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
-                          {variant.priceBreakdown?.karatUsed || '-'}
-                        </td>
+                          {/* Gold Karat dropdown select */}
+                          <td>
+                            <select
+                              className="form-input form-select"
+                              style={{ width: '85px', padding: '0.3rem 1.25rem 0.3rem 0.4rem', fontSize: '0.85rem' }}
+                              value={vEdits.karat}
+                              onChange={(e) => handleVariantMetafieldChange(variant.id, 'karat', e.target.value)}
+                            >
+                              <option value="">Inherit ({product.karatValue || 'Default'})</option>
+                              <option value="24K">24K</option>
+                              <option value="22K">22K</option>
+                              <option value="21K">21K</option>
+                              <option value="18K">18K</option>
+                              <option value="14K">14K</option>
+                              <option value="10K">10K</option>
+                            </select>
+                          </td>
 
-                        {/* Diamond Price - Inherited */}
-                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
-                          {product.diamondPrice ? `${currency} ${product.diamondPrice}` : '-'}
-                        </td>
+                          {/* Diamond Shape select */}
+                          <td>
+                            <select
+                              className="form-input form-select"
+                              style={{ width: '95px', padding: '0.3rem 1.25rem 0.3rem 0.4rem', fontSize: '0.85rem' }}
+                              value={vEdits.shape}
+                              onChange={(e) => handleVariantMetafieldChange(variant.id, 'shape', e.target.value)}
+                            >
+                              <option value="">None</option>
+                              <option value="Round">Round</option>
+                              <option value="Princess">Princess</option>
+                              <option value="Cushion">Cushion</option>
+                              <option value="Oval">Oval</option>
+                              <option value="Emerald">Emerald</option>
+                              <option value="Portuguese">Portuguese</option>
+                              <option value="Pear">Pear</option>
+                              <option value="Asscher">Asscher</option>
+                              <option value="Heart">Heart</option>
+                              <option value="Radiant">Radiant</option>
+                              <option value="Marquise">Marquise</option>
+                              <option value="Baguette">Baguette</option>
+                            </select>
+                          </td>
 
-                        {/* Column 5: Current Price */}
-                        <td style={{ fontSize: '0.85rem' }}>
-                          {currency} {parseFloat(variant.price).toFixed(2)}
-                        </td>
+                          {/* Diamond Carats Input */}
+                          <td>
+                            <input
+                              type="number"
+                              className="form-input"
+                              style={{ width: '70px', padding: '0.3rem 0.4rem', textAlign: 'center', fontSize: '0.85rem' }}
+                              placeholder="0.00"
+                              min="0"
+                              step="0.01"
+                              value={vEdits.crt}
+                              onChange={(e) => handleVariantMetafieldChange(variant.id, 'crt', e.target.value)}
+                            />
+                          </td>
 
-                        {/* Column 6: Target Calculated Price */}
-                        <td>
-                          {variant.isGoldVariant && variant.calculatedPrice !== null ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                              <span className="gold-text-gradient" style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
-                                {currency} {variant.calculatedPrice.toFixed(2)}
-                              </span>
-                              
-                              {/* Breakdown Tooltip */}
-                              {variant.priceBreakdown && (
-                                <span className="tooltip-trigger">
-                                  <HelpCircle size={12} color="var(--text-muted)" />
-                                  <div className="tooltip-box" style={{ width: '220px', whiteSpace: 'normal' }}>
-                                    <div style={{ fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: '0.25rem', marginBottom: '0.25rem', color: 'var(--gold-primary)' }}>
-                                      Pricing Breakdown ({variant.priceBreakdown.karatUsed})
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                                      <span>Gold Price/g:</span>
-                                      <span>{currency} {variant.priceBreakdown.goldPricePerGram}</span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                                      <span>Gold Cost:</span>
-                                      <span>{currency} {variant.priceBreakdown.baseGoldCost}</span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                                      <span>Diamond Price:</span>
-                                      <span>{currency} {variant.priceBreakdown.diamondPrice}</span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                                      <span>Making Charges:</span>
-                                      <span>{currency} {variant.priceBreakdown.makingCharges}</span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                                      <span>Markup amount:</span>
-                                      <span>{currency} {variant.priceBreakdown.markupAmount}</span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                                      <span>Price Before Tax:</span>
-                                      <span>{currency} {variant.priceBreakdown.priceBeforeTax}</span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--border-color)', paddingTop: '0.2rem' }}>
-                                      <span>GST Tax:</span>
-                                      <span>{currency} {variant.priceBreakdown.gstAmount}</span>
-                                    </div>
-                                  </div>
+                          {/* Diamond Color select */}
+                          <td>
+                            <select
+                              className="form-input form-select"
+                              style={{ width: '85px', padding: '0.3rem 1.25rem 0.3rem 0.4rem', fontSize: '0.85rem' }}
+                              value={vEdits.color}
+                              onChange={(e) => handleVariantMetafieldChange(variant.id, 'color', e.target.value)}
+                            >
+                              <option value="">None (G-H)</option>
+                              <option value="D">D</option>
+                              <option value="E-F">E-F</option>
+                              <option value="G-H">G-H</option>
+                            </select>
+                          </td>
+
+                          {/* Column 7: Current Price */}
+                          <td style={{ fontSize: '0.85rem' }}>
+                            {currency} {parseFloat(variant.price).toFixed(2)}
+                          </td>
+
+                          {/* Column 8: Target Calculated Price */}
+                          <td>
+                            {variant.isGoldVariant && variant.calculatedPrice !== null ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <span className="gold-text-gradient" style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                  {currency} {variant.calculatedPrice.toFixed(2)}
                                 </span>
+                                
+                                {/* Breakdown Tooltip */}
+                                {variant.priceBreakdown && (
+                                  <span className="tooltip-trigger">
+                                    <HelpCircle size={12} color="var(--text-muted)" />
+                                    <div className="tooltip-box" style={{ width: '220px', whiteSpace: 'normal' }}>
+                                      <div style={{ fontWeight: 600, borderBottom: '1px solid var(--border-color)', paddingBottom: '0.25rem', marginBottom: '0.25rem', color: 'var(--gold-primary)' }}>
+                                        Pricing Breakdown ({variant.priceBreakdown.karatUsed})
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+                                        <span>Gold Price/g:</span>
+                                        <span>{currency} {variant.priceBreakdown.goldPricePerGram}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+                                        <span>Gold Cost:</span>
+                                        <span>{currency} {variant.priceBreakdown.baseGoldCost}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+                                        <span>Diamond Price:</span>
+                                        <span>{currency} {variant.priceBreakdown.diamondPrice}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+                                        <span>Making Charges:</span>
+                                        <span>{currency} {variant.priceBreakdown.makingCharges}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+                                        <span>Markup amount:</span>
+                                        <span>{currency} {variant.priceBreakdown.markupAmount}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+                                        <span>Price Before Tax:</span>
+                                        <span>{currency} {variant.priceBreakdown.priceBeforeTax}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--border-color)', paddingTop: '0.2rem' }}>
+                                        <span>GST Tax:</span>
+                                        <span>{currency} {variant.priceBreakdown.gstAmount}</span>
+                                      </div>
+                                    </div>
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>N/A</span>
+                            )}
+                          </td>
+
+                          {/* Column 9: Status */}
+                          <td>
+                            {!variant.isGoldVariant ? (
+                              <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>No Weight</span>
+                            ) : variant.outOfSync ? (
+                              <span className="badge badge-warning">Needs Sync</span>
+                            ) : (
+                              <span className="badge badge-success">Synced</span>
+                            )}
+                          </td>
+
+                          {/* Column 10: Actions (Save Variant & Sync Price) */}
+                          <td>
+                            <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                              
+                                <button
+                                  onClick={() => handleSaveVariantMetafields(product, variant)}
+                                  className="btn btn-secondary btn-small"
+                                  style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', borderColor: 'var(--gold-primary)', color: 'var(--gold-primary)' }}
+                                  disabled={savingVariantMetafieldsId === variant.id || !hasVariantChanges}
+                                  title="Save Metafields to Shopify Variant"
+                                >
+                                  <Save size={12} className={savingVariantMetafieldsId === variant.id ? 'animate-spin' : ''} />
+                                  <span>Save</span>
+                                </button>
+                              
+                              {variant.isGoldVariant && (
+                                <button
+                                  onClick={() => handleSyncVariant(product, variant)}
+                                  className={!variant.outOfSync ? "btn btn-secondary btn-small" : "btn btn-primary btn-small"}
+                                  style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                                  disabled={syncingId === variant.id || !variant.outOfSync}
+                                >
+                                  {syncingId === variant.id ? (
+                                    <span>Syncing...</span>
+                                  ) : !variant.outOfSync ? (
+                                    <span>Synced</span>
+                                  ) : (
+                                    <>
+                                      <span>Sync</span>
+                                      <ArrowUpRight size={12} />
+                                    </>
+                                  )}
+                                </button>
                               )}
                             </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>N/A</span>
-                          )}
-                        </td>
-
-                        {/* Column 7: Status */}
-                        <td>
-                          {!variant.isGoldVariant ? (
-                            <span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>No Weight</span>
-                          ) : variant.outOfSync ? (
-                            <span className="badge badge-warning">Needs Sync</span>
-                          ) : (
-                            <span className="badge badge-success">Synced</span>
-                          )}
-                        </td>
-
-                        {/* Column 8: Actions (Sync Price) */}
-                        <td>
-                          <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end', alignItems: 'center' }}>
-                            {variant.isGoldVariant && variant.outOfSync && (
-                              <button
-                                onClick={() => handleSyncVariant(product, variant)}
-                                className="btn btn-primary btn-small"
-                                style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
-                                disabled={syncingId === variant.id}
-                              >
-                                {syncingId === variant.id ? (
-                                  <span>Syncing...</span>
-                                ) : (
-                                  <>
-                                    <span>Sync Price</span>
-                                    <ArrowUpRight size={12} />
-                                  </>
-                                )}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </React.Fragment>
                 );
               })}

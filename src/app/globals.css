@@ -10,7 +10,7 @@
   --bg-dark: #12141a;
   --bg-card: rgba(22, 26, 35, 0.7);
   --bg-card-hover: rgba(30, 36, 48, 0.85);
-  
+
   --gold-primary: #d4af37;
   --gold-light: #f6e3a4;
   --gold-dark: #aa7c11;
@@ -21,10 +21,10 @@
   --text-primary: #f3f4f6;
   --text-secondary: #9ca3af;
   --text-muted: #6b7280;
-  
+
   --border-color: rgba(212, 175, 55, 0.15);
   --border-hover: rgba(212, 175, 55, 0.35);
-  
+
   --success: #10b981;
   --danger: #ef4444;
   --warning: #f59e0b;
@@ -77,8 +77,13 @@ body::after {
 }
 
 @keyframes float-slow {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(-30px, 30px) scale(1.2); }
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  100% {
+    transform: translate(-30px, 30px) scale(1.2);
+  }
 }
 
 /* Custom Scrollbar */
@@ -86,19 +91,27 @@ body::after {
   width: 8px;
   height: 8px;
 }
+
 ::-webkit-scrollbar-track {
   background: var(--bg-deep);
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--border-color);
   border-radius: 4px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: var(--gold-dark);
 }
 
 /* Typography */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   color: var(--text-primary);
   font-weight: 600;
 }
@@ -405,11 +418,13 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
   transform: none !important;
   box-shadow: none !important;
+  border-color: #b6881a !important;
   filter: none !important;
+  color: #b6881a !important;
 }
 
 /* Custom Styled Tables */
@@ -459,13 +474,14 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Badges */
 .badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border-radius: 9999px;
   text-transform: uppercase;
+  border-radius: 9999px;
+  align-items: center;
+  padding: .25rem .6rem;
+  font-size: .75rem;
+  white-space: nowrap;
+  font-weight: 600;
+  display: inline-flex;
 }
 
 .badge-success {
@@ -580,13 +596,25 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @keyframes slideInRight {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 /* Utility Animations */
@@ -595,8 +623,13 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .loading-dots::after {
@@ -605,13 +638,34 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @keyframes dots {
-  0%, 20% { content: '.'; }
-  40% { content: '..'; }
-  60% { content: '...'; }
-  80%, 100% { content: ''; }
+
+  0%,
+  20% {
+    content: '.';
+  }
+
+  40% {
+    content: '..';
+  }
+
+  60% {
+    content: '...';
+  }
+
+  80%,
+  100% {
+    content: '';
+  }
 }
 
 @keyframes syncBannerSlideDown {
-  from { transform: translateX(-50%) translateY(-120%); opacity: 0; }
-  to   { transform: translateX(-50%) translateY(0);    opacity: 1; }
+  from {
+    transform: translateX(-50%) translateY(-120%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
 }

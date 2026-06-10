@@ -18,6 +18,16 @@ const DEFAULT_SETTINGS = {
   karatKey: 'gold_karat',
   diamondNamespace: 'custom',
   diamondKey: 'd_price',
+  variantWeightNamespace: 'custom',
+  variantWeightKey: 'gold_weight',
+  variantKaratNamespace: 'custom',
+  variantKaratKey: 'gold_karat',
+  diamondShapeNamespace: 'custom',
+  diamondShapeKey: 'diamond_shape',
+  diamondCrtNamespace: 'custom',
+  diamondCrtKey: 'diamond_crt',
+  diamondColorNamespace: 'custom',
+  diamondColorKey: 'diamond_color',
   gstPercentage: 3,
   makingChargePerGram: 0,
   makingChargeFixed: 0,
@@ -25,6 +35,22 @@ const DEFAULT_SETTINGS = {
   markupPercentage: 0,
   autoSyncEnabled: false,
   syncInterval: 5,
+  timezone: 'Asia/Dhaka',
+  syncTimes: ['18:00'],
+  diamondPrices: {
+    round: { d: 34999, ef: 31999, gh: 29999 },
+    princess: { d: 34999, ef: 31999, gh: 29999 },
+    cushion: { d: 34999, ef: 31999, gh: 29999 },
+    oval: { d: 34999, ef: 31999, gh: 29999 },
+    emerald: { d: 34999, ef: 31999, gh: 29999 },
+    portuguese: { d: 39999, ef: 36999, gh: 31999 },
+    pear: { d: 34999, ef: 31999, gh: 29999 },
+    asscher: { d: 34999, ef: 31999, gh: 29999 },
+    heart: { d: 34999, ef: 31999, gh: 29999 },
+    radiant: { d: 34999, ef: 31999, gh: 29999 },
+    marquise: { d: 34999, ef: 31999, gh: 29999 },
+    baguette: { d: 34999, ef: 31999, gh: 29999 }
+  }
 };
 
 let client = null;
@@ -36,7 +62,7 @@ async function connectToDatabase() {
     // If DB_URI is not configured, return null to fallback to local files
     return null;
   }
-  
+
   if (db) return db;
 
   try {
@@ -63,7 +89,7 @@ async function ensureDirectory() {
 export async function getSettings() {
   const mongoDb = await connectToDatabase();
   let saved = {};
-  
+
   if (mongoDb) {
     try {
       const collection = mongoDb.collection('settings');
@@ -84,7 +110,7 @@ export async function getSettings() {
       // Fallback if local file does not exist
     }
   }
-  
+
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
@@ -100,7 +126,7 @@ export async function saveSettings(newSettings) {
   delete persistableSettings.shopifyShop;
   delete persistableSettings.shopifyAccessToken;
   delete persistableSettings.goldApiKey;
-  
+
   const mongoDb = await connectToDatabase();
   if (mongoDb) {
     try {
@@ -117,7 +143,7 @@ export async function saveSettings(newSettings) {
     await ensureDirectory();
     await fs.writeFile(SETTINGS_PATH, JSON.stringify(persistableSettings, null, 2), 'utf-8');
   }
-  
+
   const currentSettings = await getSettings();
   return {
     ...currentSettings,
@@ -141,7 +167,7 @@ export async function getLogs() {
       return [];
     }
   }
-  
+
   await ensureDirectory();
   try {
     const data = await fs.readFile(LOGS_PATH, 'utf-8');
@@ -158,7 +184,7 @@ export async function addLog(log) {
     id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     timestamp: new Date().toISOString(),
   };
-  
+
   const mongoDb = await connectToDatabase();
   if (mongoDb) {
     try {
@@ -171,7 +197,7 @@ export async function addLog(log) {
       console.error('Failed to add log to MongoDB:', error);
     }
   }
-  
+
   await ensureDirectory();
   const logs = await getLogs();
   const updatedLogs = [newLog, ...logs].slice(0, 100);
@@ -195,7 +221,7 @@ export async function getSchedulerState() {
       return { lastSyncTime: 0 };
     }
   }
-  
+
   const schedulerStatePath = path.join(DATA_DIR, 'scheduler_state.json');
   try {
     const data = await fs.readFile(schedulerStatePath, 'utf-8');
@@ -220,7 +246,7 @@ export async function saveSchedulerState(state) {
       console.error('Failed to save scheduler state to MongoDB:', error);
     }
   }
-  
+
   const schedulerStatePath = path.join(DATA_DIR, 'scheduler_state.json');
   await ensureDirectory();
   await fs.writeFile(schedulerStatePath, JSON.stringify(state, null, 2), 'utf-8');

@@ -16,33 +16,65 @@ export async function GET(request) {
       return NextResponse.json({ message: 'Auto-sync is disabled in configuration settings.' });
     }
 
-    const state = await getSchedulerState();
-    const lastSyncTime = state.lastSyncTime || 0;
-    const syncIntervalMinutes = parseInt(settings.syncInterval) || 5;
-    const intervalMs = syncIntervalMinutes * 60 * 1000;
-    const now = Date.now();
-
-    // Check if the configured interval has elapsed
-    if (now - lastSyncTime >= intervalMs) {
-      console.log(`[Vercel Cron] Dynamic interval elapsed (${syncIntervalMinutes}m). Starting auto-sync...`);
-      
-      // Save new timestamp immediately to prevent overlapping execution
-      await saveSchedulerState({ lastSyncTime: now });
-      
-      const result = await runProductSync(true);
-      return NextResponse.json({
-        success: true,
-        message: 'Auto-sync completed successfully.',
-        updatedCount: result.successCount,
-        failCount: result.failCount,
-      });
+    const syncTimes = settings.syncTimes || [];
+    if (syncTimes.length === 0) {
+      return NextResponse.json({ message: 'No sync times configured.' });
     }
 
-    const nextRunSeconds = Math.ceil((intervalMs - (now - lastSyncTime)) / 1000);
+    const now = new Date();
+    const timezone = settings.timezone || 'Asia/Dhaka';
+    let formattedTime = '';
+
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false
+      }).formatToParts(now);
+      
+      let hour = 0;
+      let minute = 0;
+      for (const part of parts) {
+        if (part.type === 'hour') hour = parseInt(part.value, 10);
+        if (part.type === 'minute') minute = parseInt(part.value, 10);
+      }
+      hour = hour % 24;
+      formattedTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    } catch (err) {
+      console.error('[Vercel Cron] Timezone formatting error:', err);
+      const hour = now.getHours();
+      const minute = now.getMinutes();
+      formattedTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    }
+
+    const isScheduledTime = syncTimes.includes(formattedTime);
+
+    if (isScheduledTime) {
+      const state = await getSchedulerState();
+      const lastSyncTime = state.lastSyncTime || 0;
+      const timeSinceLastSync = Date.now() - lastSyncTime;
+
+      // Run sync only if at least 5 minutes has passed since the last sync
+      if (timeSinceLastSync >= 5 * 60 * 1000) {
+        console.log(`[Vercel Cron] Auto-sync triggered at scheduled time: ${formattedTime} (${timezone}).`);
+        await saveSchedulerState({ lastSyncTime: Date.now() });
+        
+        const result = await runProductSync(true);
+        return NextResponse.json({
+          success: true,
+          message: `Auto-sync completed successfully at ${formattedTime}.`,
+          updatedCount: result.successCount,
+          failCount: result.failCount,
+        });
+      }
+    }
+
     return NextResponse.json({
-      message: 'Sync interval has not elapsed yet.',
-      syncIntervalMinutes,
-      nextSyncInSeconds: nextRunSeconds,
+      message: 'Sync not scheduled for this minute.',
+      currentTime: formattedTime,
+      configuredTimes: syncTimes,
+      timezone
     });
   } catch (error) {
     console.error('[Vercel Cron] Sync loop execution failed:', error);

@@ -22,6 +22,16 @@ export default function SettingsPage() {
     karatKey: 'gold_karat',
     diamondNamespace: 'custom',
     diamondKey: 'diamond_price',
+    variantWeightNamespace: 'custom',
+    variantWeightKey: 'gold_weight',
+    variantKaratNamespace: 'custom',
+    variantKaratKey: 'gold_karat',
+    diamondShapeNamespace: 'custom',
+    diamondShapeKey: 'diamond_shape',
+    diamondCrtNamespace: 'custom',
+    diamondCrtKey: 'diamond_crt',
+    diamondColorNamespace: 'custom',
+    diamondColorKey: 'diamond_color',
     gstPercentage: 3,
     makingChargePerGram: 0,
     makingChargeFixed: 0,
@@ -29,6 +39,22 @@ export default function SettingsPage() {
     markupPercentage: 0,
     autoSyncEnabled: false,
     syncInterval: 5,
+    timezone: 'Asia/Dhaka',
+    syncTimes: ['18:00'],
+    diamondPrices: {
+      round: { d: 34999, ef: 31999, gh: 29999 },
+      princess: { d: 34999, ef: 31999, gh: 29999 },
+      cushion: { d: 34999, ef: 31999, gh: 29999 },
+      oval: { d: 34999, ef: 31999, gh: 29999 },
+      emerald: { d: 34999, ef: 31999, gh: 29999 },
+      portuguese: { d: 39999, ef: 36999, gh: 31999 },
+      pear: { d: 34999, ef: 31999, gh: 29999 },
+      asscher: { d: 34999, ef: 31999, gh: 29999 },
+      heart: { d: 34999, ef: 31999, gh: 29999 },
+      radiant: { d: 34999, ef: 31999, gh: 29999 },
+      marquise: { d: 34999, ef: 31999, gh: 29999 },
+      baguette: { d: 34999, ef: 31999, gh: 29999 }
+    }
   });
 
   // Simulator State
@@ -36,6 +62,10 @@ export default function SettingsPage() {
   const [simKarat, setSimKarat] = useState('18K');
   const [simDiamondPrice, setSimDiamondPrice] = useState('150');
   const [simGoldPrice, setSimGoldPrice] = useState('75.50');
+  const [simDiamondShape, setSimDiamondShape] = useState('round');
+  const [simDiamondCrt, setSimDiamondCrt] = useState('3.5');
+  const [simDiamondColor, setSimDiamondColor] = useState('d');
+  const [simUseMatrix, setSimUseMatrix] = useState(true);
 
   useEffect(() => {
     async function loadSettings() {
@@ -43,7 +73,28 @@ export default function SettingsPage() {
         const res = await fetch('/api/settings');
         if (!res.ok) throw new Error('Failed to load settings');
         const data = await res.json();
-        setSettings(data);
+        
+        // Ensure arrays and objects exist
+        const mergedData = {
+          ...data,
+          syncTimes: data.syncTimes || ['18:00'],
+          diamondPrices: {
+            round: { d: 34999, ef: 31999, gh: 29999 },
+            princess: { d: 34999, ef: 31999, gh: 29999 },
+            cushion: { d: 34999, ef: 31999, gh: 29999 },
+            oval: { d: 34999, ef: 31999, gh: 29999 },
+            emerald: { d: 34999, ef: 31999, gh: 29999 },
+            portuguese: { d: 39999, ef: 36999, gh: 31999 },
+            pear: { d: 34999, ef: 31999, gh: 29999 },
+            asscher: { d: 34999, ef: 31999, gh: 29999 },
+            heart: { d: 34999, ef: 31999, gh: 29999 },
+            radiant: { d: 34999, ef: 31999, gh: 29999 },
+            marquise: { d: 34999, ef: 31999, gh: 29999 },
+            baguette: { d: 34999, ef: 31999, gh: 29999 },
+            ...(data.diamondPrices || {})
+          }
+        };
+        setSettings(mergedData);
       } catch (error) {
         showToast(error.message || 'Error loading configurations', 'error');
       } finally {
@@ -56,7 +107,13 @@ export default function SettingsPage() {
   // Compute simulator results synchronously during render (no useEffect needed)
   const weight = parseFloat(simWeight) || 0;
   const goldPriceGram = parseFloat(simGoldPrice) || 0;
-  const diamondPrice = parseFloat(simDiamondPrice) || 0;
+  
+  let diamondPrice = parseFloat(simDiamondPrice) || 0;
+  if (simUseMatrix && simDiamondShape && simDiamondCrt && parseFloat(simDiamondCrt) > 0) {
+    const shapePrices = settings.diamondPrices?.[simDiamondShape] || {};
+    const pricePerCrt = parseFloat(shapePrices[simDiamondColor]) || 0;
+    diamondPrice = parseFloat(simDiamondCrt) * pricePerCrt;
+  }
   
   const simKaratNum = parseInt(simKarat.replace(/[^0-9]/g, '')) || 18;
   const baseGoldPriceForKarat = goldPriceGram * (simKaratNum / 24);
@@ -94,6 +151,50 @@ export default function SettingsPage() {
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
     }));
+  };
+
+  const handleSyncTimeChange = (index, value) => {
+    setSettings((prev) => {
+      const times = [...(prev.syncTimes || [])];
+      times[index] = value;
+      return {
+        ...prev,
+        syncTimes: times,
+      };
+    });
+  };
+
+  const handleFrequencyChange = (e) => {
+    const freq = parseInt(e.target.value, 10);
+    setSettings((prev) => {
+      const times = [...(prev.syncTimes || [])];
+      if (times.length < freq) {
+        while (times.length < freq) {
+          times.push('12:00');
+        }
+      } else if (times.length > freq) {
+        times.splice(freq);
+      }
+      return {
+        ...prev,
+        syncTimes: times,
+      };
+    });
+  };
+
+  const handleDiamondPriceChange = (shape, colorKey, value) => {
+    const val = parseFloat(value) || 0;
+    setSettings((prev) => {
+      const prices = { ...prev.diamondPrices };
+      prices[shape] = {
+        ...prices[shape],
+        [colorKey]: val,
+      };
+      return {
+        ...prev,
+        diamondPrices: prices,
+      };
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -257,7 +358,7 @@ export default function SettingsPage() {
               <span>Automatic Price Sync</span>
             </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-              Automatically run gold price sync on the server at regular intervals.
+              Automatically run gold price sync on the server at daily scheduled times.
             </p>
 
             <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
@@ -274,41 +375,81 @@ export default function SettingsPage() {
               </label>
             </div>
 
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="syncInterval">
-                Sync Interval (Minutes)
-              </label>
-              <select
-                id="syncInterval"
-                name="syncInterval"
-                className="form-input form-select"
-                value={settings.syncInterval}
-                onChange={handleChange}
-                disabled={!settings.autoSyncEnabled}
-              >
-                <option value="1">1 Minute (Testing)</option>
-                <option value="5">5 Minutes</option>
-                <option value="10">10 Minutes</option>
-                <option value="15">15 Minutes</option>
-                <option value="30">30 Minutes</option>
-                <option value="60">1 Hour (60 Minutes)</option>
-              </select>
-            </div>
+            {settings.autoSyncEnabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                  <label className="form-label" htmlFor="timezone">
+                    Timezone
+                  </label>
+                  <select
+                    id="timezone"
+                    name="timezone"
+                    className="form-input form-select"
+                    value={settings.timezone || 'Asia/Dhaka'}
+                    onChange={handleChange}
+                  >
+                    <option value="Asia/Dhaka">Asia/Dhaka (GMT+6)</option>
+                    <option value="Asia/Kolkata">Asia/Kolkata (GMT+5:30)</option>
+                    <option value="UTC">UTC (GMT+0)</option>
+                    <option value="America/New_York">America/New_York (EST/EDT)</option>
+                    <option value="Europe/London">Europe/London (GMT/BST)</option>
+                    <option value="Asia/Dubai">Asia/Dubai (GMT+4)</option>
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                  <label className="form-label">
+                    Sync Frequency
+                  </label>
+                  <select
+                    className="form-input form-select"
+                    value={(settings.syncTimes || []).length}
+                    onChange={handleFrequencyChange}
+                  >
+                    <option value="1">1 time per day</option>
+                    <option value="2">2 times per day</option>
+                    <option value="3">3 times per day</option>
+                    <option value="4">4 times per day</option>
+                    <option value="5">5 times per day</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <label className="form-label" style={{ marginBottom: 0 }}>Scheduled Times</label>
+                  {(settings.syncTimes || []).map((time, idx) => (
+                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', minWidth: '60px' }}>Time {idx + 1}:</span>
+                      <input
+                        type="time"
+                        className="form-input"
+                        style={{ maxWidth: '150px' }}
+                        value={time}
+                        onChange={(e) => handleSyncTimeChange(idx, e.target.value)}
+                        required
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="glass-card">
             <h2 className="card-title luxury-text">
               <span>Metafield Mapping (Variant Level)</span>
             </h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+              Define namespaces and keys for Shopify Variant Metafields.
+            </p>
             
             <div className="grid-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Gold Weight Namespace</label>
                 <input
                   type="text"
-                  name="weightNamespace"
+                  name="variantWeightNamespace"
                   className="form-input"
-                  value={settings.weightNamespace}
+                  value={settings.variantWeightNamespace}
                   onChange={handleChange}
                   required
                 />
@@ -317,9 +458,9 @@ export default function SettingsPage() {
                 <label className="form-label">Gold Weight Key</label>
                 <input
                   type="text"
-                  name="weightKey"
+                  name="variantWeightKey"
                   className="form-input"
-                  value={settings.weightKey}
+                  value={settings.variantWeightKey}
                   onChange={handleChange}
                   required
                 />
@@ -331,9 +472,9 @@ export default function SettingsPage() {
                 <label className="form-label">Gold Karat Namespace</label>
                 <input
                   type="text"
-                  name="karatNamespace"
+                  name="variantKaratNamespace"
                   className="form-input"
-                  value={settings.karatNamespace}
+                  value={settings.variantKaratNamespace}
                   onChange={handleChange}
                   required
                 />
@@ -342,9 +483,59 @@ export default function SettingsPage() {
                 <label className="form-label">Gold Karat Key</label>
                 <input
                   type="text"
-                  name="karatKey"
+                  name="variantKaratKey"
                   className="form-input"
-                  value={settings.karatKey}
+                  value={settings.variantKaratKey}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Diamond Shape Namespace</label>
+                <input
+                  type="text"
+                  name="diamondShapeNamespace"
+                  className="form-input"
+                  value={settings.diamondShapeNamespace}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Diamond Shape Key</label>
+                <input
+                  type="text"
+                  name="diamondShapeKey"
+                  className="form-input"
+                  value={settings.diamondShapeKey}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Diamond Carats Namespace</label>
+                <input
+                  type="text"
+                  name="diamondCrtNamespace"
+                  className="form-input"
+                  value={settings.diamondCrtNamespace}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Diamond Carats Key</label>
+                <input
+                  type="text"
+                  name="diamondCrtKey"
+                  className="form-input"
+                  value={settings.diamondCrtKey}
                   onChange={handleChange}
                   required
                 />
@@ -353,23 +544,23 @@ export default function SettingsPage() {
 
             <div className="grid-2" style={{ gap: '1rem', marginBottom: 0 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Diamond Price Namespace</label>
+                <label className="form-label">Diamond Color Namespace</label>
                 <input
                   type="text"
-                  name="diamondNamespace"
+                  name="diamondColorNamespace"
                   className="form-input"
-                  value={settings.diamondNamespace}
+                  value={settings.diamondColorNamespace}
                   onChange={handleChange}
                   required
                 />
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Diamond Price Key</label>
+                <label className="form-label">Diamond Color Key</label>
                 <input
                   type="text"
-                  name="diamondKey"
+                  name="diamondColorKey"
                   className="form-input"
-                  value={settings.diamondKey}
+                  value={settings.diamondColorKey}
                   onChange={handleChange}
                   required
                 />
@@ -456,6 +647,66 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          <div className="glass-card" style={{ maxHeight: '420px', overflowY: 'auto' }}>
+            <h2 className="card-title luxury-text">
+              <span>Diamond Price Matrix (per crt)</span>
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+              Define lab-grown VS diamond prices per carat for shapes and color grades.
+            </p>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'center' }}>
+                  <th style={{ textAlign: 'left', padding: '0.5rem 0' }}>Shape</th>
+                  <th style={{ padding: '0.5rem 0' }}>D Color</th>
+                  <th style={{ padding: '0.5rem 0' }}>E-F Color</th>
+                  <th style={{ padding: '0.5rem 0' }}>G-H Color</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.keys(settings.diamondPrices || {}).map((shape) => (
+                  <tr key={shape} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                    <td style={{ padding: '0.5rem 0', fontWeight: 600, textTransform: 'capitalize' }}>{shape}</td>
+                    <td style={{ padding: '0.25rem' }}>
+                      <input
+                        type="number"
+                        className="form-input"
+                        style={{ padding: '0.25rem 0.5rem', textAlign: 'center', minWidth: '70px', fontSize: '0.8rem' }}
+                        value={settings.diamondPrices[shape].d}
+                        onChange={(e) => handleDiamondPriceChange(shape, 'd', e.target.value)}
+                        required
+                        min="0"
+                      />
+                    </td>
+                    <td style={{ padding: '0.25rem' }}>
+                      <input
+                        type="number"
+                        className="form-input"
+                        style={{ padding: '0.25rem 0.5rem', textAlign: 'center', minWidth: '70px', fontSize: '0.8rem' }}
+                        value={settings.diamondPrices[shape].ef}
+                        onChange={(e) => handleDiamondPriceChange(shape, 'ef', e.target.value)}
+                        required
+                        min="0"
+                      />
+                    </td>
+                    <td style={{ padding: '0.25rem' }}>
+                      <input
+                        type="number"
+                        className="form-input"
+                        style={{ padding: '0.25rem 0.5rem', textAlign: 'center', minWidth: '70px', fontSize: '0.8rem' }}
+                        value={settings.diamondPrices[shape].gh}
+                        onChange={(e) => handleDiamondPriceChange(shape, 'gh', e.target.value)}
+                        required
+                        min="0"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
           <div className="glass-card" style={{ borderColor: 'rgba(212, 175, 55, 0.45)', boxShadow: 'var(--gold-glow)' }}>
             <h2 className="card-title luxury-text" style={{ color: 'var(--gold-primary)' }}>
               <Calculator size={18} />
@@ -488,32 +739,100 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="grid-2" style={{ gap: '0.75rem', marginBottom: '1.25rem' }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: '0.75rem' }}>Diamond Cost ($)</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  value={simDiamondPrice}
-                  onChange={(e) => setSimDiamondPrice(e.target.value)}
-                  step="0.01"
-                />
+            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+              <input
+                id="simUseMatrix"
+                type="checkbox"
+                style={{ width: '16px', height: '16px', accentColor: 'var(--gold-primary)', cursor: 'pointer' }}
+                checked={simUseMatrix}
+                onChange={(e) => setSimUseMatrix(e.target.checked)}
+              />
+              <label htmlFor="simUseMatrix" className="form-label" style={{ marginBottom: 0, cursor: 'pointer', fontSize: '0.85rem' }}>
+                Use Diamond Price Matrix
+              </label>
+            </div>
+
+            {simUseMatrix ? (
+              <div className="grid-3" style={{ gap: '0.5rem', marginBottom: '1.25rem' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Shape</label>
+                  <select
+                    className="form-input form-select"
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.5rem' }}
+                    value={simDiamondShape}
+                    onChange={(e) => setSimDiamondShape(e.target.value)}
+                  >
+                    <option value="round">Round</option>
+                    <option value="princess">Princess</option>
+                    <option value="cushion">Cushion</option>
+                    <option value="oval">Oval</option>
+                    <option value="emerald">Emerald</option>
+                    <option value="portuguese">Portuguese</option>
+                    <option value="pear">Pear</option>
+                    <option value="asscher">Asscher</option>
+                    <option value="heart">Heart</option>
+                    <option value="radiant">Radiant</option>
+                    <option value="marquise">Marquise</option>
+                    <option value="baguette">Baguette</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Carats (crt)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    style={{ padding: '0.35rem 0.5rem' }}
+                    value={simDiamondCrt}
+                    onChange={(e) => setSimDiamondCrt(e.target.value)}
+                    step="0.01"
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Color</label>
+                  <select
+                    className="form-input form-select"
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.5rem' }}
+                    value={simDiamondColor}
+                    onChange={(e) => setSimDiamondColor(e.target.value)}
+                  >
+                    <option value="d">D</option>
+                    <option value="ef">E-F</option>
+                    <option value="gh">G-H</option>
+                  </select>
+                </div>
               </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: '0.75rem' }}>Karat</label>
-                <select
-                  className="form-input form-select"
-                  value={simKarat}
-                  onChange={(e) => setSimKarat(e.target.value)}
-                >
-                  <option value="24K">24K</option>
-                  <option value="22K">22K</option>
-                  <option value="21K">21K</option>
-                  <option value="18K">18K</option>
-                  <option value="14K">14K</option>
-                  <option value="10K">10K</option>
-                </select>
+            ) : (
+              <div className="grid-2" style={{ gap: '0.75rem', marginBottom: '1.25rem' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Diamond Cost ($)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={simDiamondPrice}
+                    onChange={(e) => setSimDiamondPrice(e.target.value)}
+                    step="0.01"
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  {/* Empty spacer to keep layout aligned */}
+                </div>
               </div>
+            )}
+
+            <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+              <label className="form-label" style={{ fontSize: '0.75rem' }}>Karat</label>
+              <select
+                className="form-input form-select"
+                value={simKarat}
+                onChange={(e) => setSimKarat(e.target.value)}
+              >
+                <option value="24K">24K</option>
+                <option value="22K">22K</option>
+                <option value="21K">21K</option>
+                <option value="18K">18K</option>
+                <option value="14K">14K</option>
+                <option value="10K">10K</option>
+              </select>
             </div>
 
             {simResult && (

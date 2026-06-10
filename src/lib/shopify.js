@@ -40,12 +40,26 @@ async function shopifyGraphQL(query, variables = {}) {
 
 export async function fetchShopifyProducts(searchQuery) {
   const settings = await getSettings();
+  
+  // Product level mappings
   const weightNamespace = settings.weightNamespace || 'custom';
   const weightKey = settings.weightKey || 'gold_weight';
   const karatNamespace = settings.karatNamespace || 'custom';
   const karatKey = settings.karatKey || 'gold_karat';
   const diamondNamespace = settings.diamondNamespace || 'custom';
   const diamondKey = settings.diamondKey || 'diamond_price';
+
+  // Variant level mappings
+  const variantWeightNamespace = settings.variantWeightNamespace || 'custom';
+  const variantWeightKey = settings.variantWeightKey || 'gold_weight';
+  const variantKaratNamespace = settings.variantKaratNamespace || 'custom';
+  const variantKaratKey = settings.variantKaratKey || 'gold_karat';
+  const diamondShapeNamespace = settings.diamondShapeNamespace || 'custom';
+  const diamondShapeKey = settings.diamondShapeKey || 'diamond_shape';
+  const diamondCrtNamespace = settings.diamondCrtNamespace || 'custom';
+  const diamondCrtKey = settings.diamondCrtKey || 'diamond_crt';
+  const diamondColorNamespace = settings.diamondColorNamespace || 'custom';
+  const diamondColorKey = settings.diamondColorKey || 'diamond_color';
 
   let shopifyQuery = '';
   if (searchQuery) {
@@ -62,6 +76,16 @@ export async function fetchShopifyProducts(searchQuery) {
       $karatKey: String!
       $diamondNamespace: String!
       $diamondKey: String!
+      $variantWeightNamespace: String!
+      $variantWeightKey: String!
+      $variantKaratNamespace: String!
+      $variantKaratKey: String!
+      $diamondShapeNamespace: String!
+      $diamondShapeKey: String!
+      $diamondCrtNamespace: String!
+      $diamondCrtKey: String!
+      $diamondColorNamespace: String!
+      $diamondColorKey: String!
     ) {
       products(first: $first, query: $query) {
         edges {
@@ -88,13 +112,42 @@ export async function fetchShopifyProducts(searchQuery) {
               value
               type
             }
-            variants(first: 20) {
+            variants(first: 100) {
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
               edges {
                 node {
                   id
                   title
                   price
                   sku
+                  vWeightMetafield: metafield(namespace: $variantWeightNamespace, key: $variantWeightKey) {
+                    id
+                    value
+                    type
+                  }
+                  vKaratMetafield: metafield(namespace: $variantKaratNamespace, key: $variantKaratKey) {
+                    id
+                    value
+                    type
+                  }
+                  vShapeMetafield: metafield(namespace: $diamondShapeNamespace, key: $diamondShapeKey) {
+                    id
+                    value
+                    type
+                  }
+                  vCrtMetafield: metafield(namespace: $diamondCrtNamespace, key: $diamondCrtKey) {
+                    id
+                    value
+                    type
+                  }
+                  vColorMetafield: metafield(namespace: $diamondColorNamespace, key: $diamondColorKey) {
+                    id
+                    value
+                    type
+                  }
                 }
               }
             }
@@ -113,23 +166,176 @@ export async function fetchShopifyProducts(searchQuery) {
     karatKey,
     diamondNamespace,
     diamondKey,
+    variantWeightNamespace,
+    variantWeightKey,
+    variantKaratNamespace,
+    variantKaratKey,
+    diamondShapeNamespace,
+    diamondShapeKey,
+    diamondCrtNamespace,
+    diamondCrtKey,
+    diamondColorNamespace,
+    diamondColorKey,
   };
+
+  // Helper to extract diamond carats and gold karat from variant title
+  // Title format examples: "Yellow gold / 1.5ct / 18K", "White gold / 1ct / 14kt", "2ct / 18k"
+  function parseVariantTitle(title) {
+    if (!title) return { titleCrt: null, titleKarat: null };
+
+    // Extract diamond carats — match patterns like "1ct", "1.5ct", "2 ct" (case insensitive)
+    const crtMatch = title.match(/(\d+(?:\.\d+)?)\s*ct/i);
+    const titleCrt = crtMatch ? parseFloat(crtMatch[1]) : null;
+
+    // Extract gold karat — match patterns like "18K", "14K", "22K", "18kt", "14kt" (case insensitive)
+    const karatMatch = title.match(/\b(\d{2})\s*k(?:t|arat)?\b/i);
+    const titleKarat = karatMatch ? `${karatMatch[1]}K` : null;
+
+    return { titleCrt, titleKarat };
+  }
+
+  // Helper to map a raw variant node to our shape
+  function mapVariant(variant) {
+    const { titleCrt, titleKarat } = parseVariantTitle(variant.title);
+
+    // Metafield values take priority; fall back to title-parsed values
+    const crtValue = variant.vCrtMetafield?.value
+      ? parseFloat(variant.vCrtMetafield.value)
+      : titleCrt;
+
+    const karatValue = variant.vKaratMetafield?.value
+      ? variant.vKaratMetafield.value
+      : titleKarat;
+
+    return {
+      id: variant.id,
+      title: variant.title,
+      price: variant.price,
+      sku: variant.sku || null,
+      weightValue: variant.vWeightMetafield?.value ? parseFloat(variant.vWeightMetafield.value) : null,
+      karatValue,
+      shapeValue: variant.vShapeMetafield?.value || null,
+      crtValue,
+      colorValue: variant.vColorMetafield?.value || null,
+      weightMetafieldId: variant.vWeightMetafield?.id,
+      karatMetafieldId: variant.vKaratMetafield?.id,
+      shapeMetafieldId: variant.vShapeMetafield?.id,
+      crtMetafieldId: variant.vCrtMetafield?.id,
+      colorMetafieldId: variant.vColorMetafield?.id,
+    };
+  }
+
+
+  // Helper to paginate ALL variants for a single product using cursor
+  async function fetchRemainingVariants(productId, afterCursor) {
+    const variantPageQuery = `
+      query GetProductVariants(
+        $productId: ID!
+        $after: String
+        $variantWeightNamespace: String!
+        $variantWeightKey: String!
+        $variantKaratNamespace: String!
+        $variantKaratKey: String!
+        $diamondShapeNamespace: String!
+        $diamondShapeKey: String!
+        $diamondCrtNamespace: String!
+        $diamondCrtKey: String!
+        $diamondColorNamespace: String!
+        $diamondColorKey: String!
+      ) {
+        product(id: $productId) {
+          variants(first: 100, after: $after) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              node {
+                id
+                title
+                price
+                sku
+                vWeightMetafield: metafield(namespace: $variantWeightNamespace, key: $variantWeightKey) {
+                  id
+                  value
+                  type
+                }
+                vKaratMetafield: metafield(namespace: $variantKaratNamespace, key: $variantKaratKey) {
+                  id
+                  value
+                  type
+                }
+                vShapeMetafield: metafield(namespace: $diamondShapeNamespace, key: $diamondShapeKey) {
+                  id
+                  value
+                  type
+                }
+                vCrtMetafield: metafield(namespace: $diamondCrtNamespace, key: $diamondCrtKey) {
+                  id
+                  value
+                  type
+                }
+                vColorMetafield: metafield(namespace: $diamondColorNamespace, key: $diamondColorKey) {
+                  id
+                  value
+                  type
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const allVariants = [];
+    let cursor = afterCursor;
+    let hasMore = true;
+
+    while (hasMore) {
+      const data = await shopifyGraphQL(variantPageQuery, {
+        productId,
+        after: cursor,
+        variantWeightNamespace,
+        variantWeightKey,
+        variantKaratNamespace,
+        variantKaratKey,
+        diamondShapeNamespace,
+        diamondShapeKey,
+        diamondCrtNamespace,
+        diamondCrtKey,
+        diamondColorNamespace,
+        diamondColorKey,
+      });
+
+      const variantsPage = data.product?.variants;
+      const edges = variantsPage?.edges || [];
+      allVariants.push(...edges.map(({ node }) => mapVariant(node)));
+
+      hasMore = variantsPage?.pageInfo?.hasNextPage || false;
+      cursor = variantsPage?.pageInfo?.endCursor || null;
+    }
+
+    return allVariants;
+  }
 
   try {
     const data = await shopifyGraphQL(query, variables);
     const edges = data.products?.edges || [];
 
-    return edges.map(({ node }) => {
+    // Map initial page of variants and collect products needing more variant pages
+    const products = await Promise.all(edges.map(async ({ node }) => {
       const weightValue = node.weightMetafield?.value ? parseFloat(node.weightMetafield.value) : null;
       const karatValue = node.karatMetafield?.value || null;
       const diamondPrice = node.diamondMetafield?.value ? parseFloat(node.diamondMetafield.value) : 0;
 
-      const variants = (node.variants?.edges || []).map(({ node: variant }) => ({
-        id: variant.id,
-        title: variant.title,
-        price: variant.price,
-        sku: variant.sku || null,
-      }));
+      const variantsPage = node.variants;
+      let variants = (variantsPage?.edges || []).map(({ node: variant }) => mapVariant(variant));
+
+      // If there are more variant pages, fetch them all
+      if (variantsPage?.pageInfo?.hasNextPage) {
+        const extraVariants = await fetchRemainingVariants(node.id, variantsPage.pageInfo.endCursor);
+        variants = [...variants, ...extraVariants];
+      }
 
       return {
         id: node.id,
@@ -145,7 +351,9 @@ export async function fetchShopifyProducts(searchQuery) {
         diamondMetafieldId: node.diamondMetafield?.id,
         variants,
       };
-    });
+    }));
+
+    return products;
   } catch (error) {
     const settings = await getSettings();
     if (!settings.shopifyShop || !settings.shopifyAccessToken) {
@@ -258,6 +466,106 @@ export async function updateShopifyProductMetafields(productId, weight, karat, d
 
   if (errors.length > 0) {
     throw new Error(`Shopify Metafields Set Error: ${errors.map((e) => e.message).join(', ')}`);
+  }
+
+  return true;
+}
+
+export async function updateShopifyVariantMetafields({ productId, variantId, weight, karat, shape, crt, color }) {
+  const settings = await getSettings();
+  
+  const variantWeightNamespace = settings.variantWeightNamespace || 'custom';
+  const variantWeightKey = settings.variantWeightKey || 'gold_weight';
+  
+  const variantKaratNamespace = settings.variantKaratNamespace || 'custom';
+  const variantKaratKey = settings.variantKaratKey || 'gold_karat';
+  
+  const diamondShapeNamespace = settings.diamondShapeNamespace || 'custom';
+  const diamondShapeKey = settings.diamondShapeKey || 'diamond_shape';
+  
+  const diamondCrtNamespace = settings.diamondCrtNamespace || 'custom';
+  const diamondCrtKey = settings.diamondCrtKey || 'diamond_crt';
+  
+  const diamondColorNamespace = settings.diamondColorNamespace || 'custom';
+  const diamondColorKey = settings.diamondColorKey || 'diamond_color';
+
+  const mutation = `
+    mutation UpdateVariantMetafields($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields {
+          id
+          namespace
+          key
+          value
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  const metafields = [];
+
+  if (weight !== null && weight !== undefined) {
+    metafields.push({
+      ownerId: variantId,
+      namespace: variantWeightNamespace,
+      key: variantWeightKey,
+      value: weight.toString(),
+      type: 'single_line_text_field',
+    });
+  }
+
+  if (karat !== null && karat !== undefined) {
+    metafields.push({
+      ownerId: variantId,
+      namespace: variantKaratNamespace,
+      key: variantKaratKey,
+      value: karat.trim(),
+      type: 'single_line_text_field',
+    });
+  }
+
+  if (shape !== null && shape !== undefined) {
+    metafields.push({
+      ownerId: variantId,
+      namespace: diamondShapeNamespace,
+      key: diamondShapeKey,
+      value: shape.trim(),
+      type: 'single_line_text_field',
+    });
+  }
+
+  if (crt !== null && crt !== undefined) {
+    metafields.push({
+      ownerId: variantId,
+      namespace: diamondCrtNamespace,
+      key: diamondCrtKey,
+      value: crt.toString(),
+      type: 'single_line_text_field',
+    });
+  }
+
+  if (color !== null && color !== undefined) {
+    metafields.push({
+      ownerId: variantId,
+      namespace: diamondColorNamespace,
+      key: diamondColorKey,
+      value: color.trim(),
+      type: 'single_line_text_field',
+    });
+  }
+
+  if (metafields.length === 0) return true;
+
+  const variables = { metafields };
+  const data = await shopifyGraphQL(mutation, variables);
+  const errors = data.metafieldsSet?.userErrors || [];
+
+  if (errors.length > 0) {
+    throw new Error(`Shopify Variant Metafields Set Error: ${errors.map((e) => e.message).join(', ')}`);
   }
 
   return true;

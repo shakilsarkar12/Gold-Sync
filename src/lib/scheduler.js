@@ -26,23 +26,55 @@ export function initScheduler() {
         return;
       }
 
-      const syncIntervalMinutes = parseInt(settings.syncInterval) || 5;
-      const intervalMs = syncIntervalMinutes * 60 * 1000;
-      const now = Date.now();
+      const syncTimes = settings.syncTimes || [];
+      if (syncTimes.length === 0) {
+        return;
+      }
 
-      // Read lastSyncTime from DB (persists across hot-reloads and restarts)
-      const state = await getSchedulerState();
-      const lastSyncTime = state.lastSyncTime || 0;
+      const now = new Date();
+      const timezone = settings.timezone || 'Asia/Dhaka';
+      let formattedTime = '';
+      
+      try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone,
+          hour: 'numeric',
+          minute: 'numeric',
+          hour12: false
+        }).formatToParts(now);
+        
+        let hour = 0;
+        let minute = 0;
+        for (const part of parts) {
+          if (part.type === 'hour') hour = parseInt(part.value, 10);
+          if (part.type === 'minute') minute = parseInt(part.value, 10);
+        }
+        hour = hour % 24;
+        formattedTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      } catch (err) {
+        console.error('[Scheduler] Timezone formatting error:', err);
+        const hour = now.getHours();
+        const minute = now.getMinutes();
+        formattedTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      }
 
-      // Check if it's time to run the sync
-      if (now - lastSyncTime >= intervalMs) {
-        console.log(`[Scheduler] Auto-sync triggered. Interval: ${syncIntervalMinutes}m. Last sync: ${lastSyncTime ? new Date(lastSyncTime).toISOString() : 'never'}`);
-        
-        // Persist the new timestamp BEFORE running to prevent overlapping ticks
-        await saveSchedulerState({ lastSyncTime: now });
-        
-        const result = await runProductSync(true);
-        console.log(`[Scheduler] Auto-sync completed. Updated: ${result.successCount}, Failed: ${result.failCount}.`);
+      const isScheduledTime = syncTimes.includes(formattedTime);
+
+      if (isScheduledTime) {
+        // Read lastSyncTime from DB (persists across hot-reloads and restarts)
+        const state = await getSchedulerState();
+        const lastSyncTime = state.lastSyncTime || 0;
+        const timeSinceLastSync = Date.now() - lastSyncTime;
+
+        // Run sync only if at least 5 minutes has passed since the last sync
+        // to prevent duplicate triggers in the same 1-minute window.
+        if (timeSinceLastSync >= 5 * 60 * 1000) {
+          console.log(`[Scheduler] Auto-sync triggered at scheduled time: ${formattedTime} (${timezone}).`);
+          await saveSchedulerState({ lastSyncTime: Date.now() });
+          
+          const result = await runProductSync(true);
+          console.log(`[Scheduler] Auto-sync completed. Updated: ${result.successCount}, Failed: ${result.failCount}.`);
+        }
       }
     } catch (error) {
       console.error('[Scheduler] Error in auto-sync tick:', error);

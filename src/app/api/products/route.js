@@ -5,6 +5,7 @@ import {
   fetchShopifyProducts,
   updateShopifyVariantPrice,
   updateShopifyProductMetafields,
+  updateShopifyVariantMetafields,
 } from '@/lib/shopify';
 import { calculateVariantPrice, runProductSync } from '@/lib/sync';
 import { initScheduler } from '@/lib/scheduler';
@@ -33,12 +34,16 @@ export async function GET() {
 
     const products = await fetchShopifyProducts();
     
-    // Enrich variants of each product using product-level weight/diamond fields
+    // Enrich variants of each product using variant-level fields, or product-level fallbacks
     const enrichedProducts = products.map((product) => {
-      const isGold = product.weightValue !== null && product.weightValue > 0;
       let productOutOfSync = false;
+      let isAnyVariantGold = false;
 
       const enrichedVariants = product.variants.map((variant) => {
+        const vWeight = variant.weightValue !== null ? variant.weightValue : product.weightValue;
+        const vKarat = variant.karatValue !== null ? variant.karatValue : product.karatValue;
+
+        const isGold = vWeight !== null && vWeight > 0;
         if (!isGold) {
           return {
             ...variant,
@@ -48,15 +53,20 @@ export async function GET() {
           };
         }
 
-        // Run calculation: weight and diamondPrice come from product level, karat is variant-dependent
-        const { finalPrice, breakdown } = calculateVariantPrice(
-          product.weightValue,
-          product.karatValue, // product-level karat fallback
-          product.diamondPrice, // product-level diamond price
+        isAnyVariantGold = true;
+
+        // Run calculation: weight and diamond details are resolved with variant priority
+        const { finalPrice, breakdown } = calculateVariantPrice({
+          weight: vWeight,
+          karatStr: vKarat,
+          diamondPrice: product.diamondPrice,
+          diamondShape: variant.shapeValue,
+          diamondCrt: variant.crtValue,
+          diamondColor: variant.colorValue,
           rates,
           settings,
-          variant.title // variant-level title (for karat parsing)
-        );
+          variantTitle: variant.title
+        });
 
         const diff = Math.abs(parseFloat(variant.price) - finalPrice);
         const outOfSync = diff > 0.05;
@@ -77,7 +87,7 @@ export async function GET() {
       return {
         ...product,
         variants: enrichedVariants,
-        isGoldProduct: isGold,
+        isGoldProduct: isAnyVariantGold || (product.weightValue !== null && product.weightValue > 0),
         outOfSync: productOutOfSync,
       };
     });
@@ -100,28 +110,74 @@ export async function POST(request) {
     const { action, ...payload } = await request.json();
     
     if (action === 'update_metafields') {
-      const { productId, weight, karat, diamondPrice } = payload;
+      const { productId, variantId, weight, karat, shape, crt, color, diamondPrice } = payload;
       
-      if (!productId) {
-        return NextResponse.json({ error: 'productId is required' }, { status: 400 });
+      if (variantId) {
+        const parsedWeight = weight !== undefined && weight !== '' ? parseFloat(weight) : null;
+        const parsedKarat = karat !== undefined && karat !== '' ? karat : null;
+        const parsedShape = shape !== undefined && shape !== '' ? shape : null;
+        const parsedCrt = crt !== undefined && crt !== '' ? parseFloat(crt) : null;
+        const parsedColor = color !== undefined && color !== '' ? color : null;
+
+        await updateShopifyVariantMetafields({
+          productId,
+          variantId,
+          weight: parsedWeight,
+          karat: parsedKarat,
+          shape: parsedShape,
+          crt: parsedCrt,
+          color: parsedColor,
+        });
+
+        return NextResponse.json({ success: true, message: 'Variant metafields updated successfully' });
+      } else {
+        if (!productId) {
+          return NextResponse.json({ error: 'productId is required' }, { status: 400 });
+        }
+
+        const parsedWeight = weight !== undefined && weight !== '' ? parseFloat(weight) : null;
+        const parsedKarat = karat !== undefined && karat !== '' ? karat : null;
+        const parsedDiamondPrice = diamondPrice !== undefined && diamondPrice !== '' ? parseFloat(diamondPrice) : null;
+
+        await updateShopifyProductMetafields(productId, parsedWeight, parsedKarat, parsedDiamondPrice);
+        
+        return NextResponse.json({ success: true, message: 'Product metafields updated successfully' });
       }
-
-      const parsedWeight = weight !== undefined && weight !== '' ? parseFloat(weight) : null;
-      const parsedKarat = karat !== undefined && karat !== '' ? karat : null;
-      const parsedDiamondPrice = diamondPrice !== undefined && diamondPrice !== '' ? parseFloat(diamondPrice) : null;
-
-      await updateShopifyProductMetafields(productId, parsedWeight, parsedKarat, parsedDiamondPrice);
-      
-      return NextResponse.json({ success: true, message: 'Product metafields updated successfully' });
     }
     
     if (action === 'sync_variant') {
-      const { productId, productTitle, variantId, variantTitle, newPrice, oldPrice } = payload;
+      const { productId, productTitle, variantId, variantTitle, newPrice, oldPrice, metafields } = payload;
       
       if (!productId || !variantId || !newPrice) {
         return NextResponse.json({ error: 'productId, variantId and newPrice are required' }, { status: 400 });
       }
 
+      // 1. Save any edited metafields to Shopify first
+      if (metafields) {
+        const parsedWeight = metafields.weight !== '' ? parseFloat(metafields.weight) : null;
+        const parsedKarat = metafields.karat !== '' ? metafields.karat : null;
+        const parsedShape = metafields.shape !== '' ? metafields.shape : null;
+        const parsedCrt = metafields.crt !== '' ? parseFloat(metafields.crt) : null;
+        const parsedColor = metafields.color !== '' ? metafields.color : null;
+
+        // Only call if at least one metafield has a value
+        const hasAnyMetafield = parsedWeight !== null || parsedKarat !== null ||
+          parsedShape !== null || parsedCrt !== null || parsedColor !== null;
+
+        if (hasAnyMetafield) {
+          await updateShopifyVariantMetafields({
+            productId,
+            variantId,
+            weight: parsedWeight,
+            karat: parsedKarat,
+            shape: parsedShape,
+            crt: parsedCrt,
+            color: parsedColor,
+          });
+        }
+      }
+
+      // 2. Update the variant price in Shopify
       await updateShopifyVariantPrice(productId, variantId, newPrice.toString());
       
       await addLog({
@@ -131,16 +187,69 @@ export async function POST(request) {
         productsUpdated: 1,
       });
 
-      return NextResponse.json({ success: true, message: 'Variant price synced successfully' });
+      return NextResponse.json({ success: true, message: 'Variant price and metafields synced successfully' });
     }
 
     if (action === 'sync_bulk') {
-      const result = await runProductSync(false); // Manual bulk sync trigger
+      const { items } = payload;
+      if (!items || !Array.isArray(items)) {
+        return NextResponse.json({ error: 'items array is required' }, { status: 400 });
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+      const errors = [];
+
+      for (const item of items) {
+        try {
+          // 1. Save metafields if provided
+          if (item.metafields) {
+            const mf = item.metafields;
+            const parsedWeight = mf.weight !== '' ? parseFloat(mf.weight) : null;
+            const parsedKarat = mf.karat !== '' ? mf.karat : null;
+            const parsedShape = mf.shape !== '' ? mf.shape : null;
+            const parsedCrt = mf.crt !== '' ? parseFloat(mf.crt) : null;
+            const parsedColor = mf.color !== '' ? mf.color : null;
+
+            const hasAnyMetafield = parsedWeight !== null || parsedKarat !== null ||
+              parsedShape !== null || parsedCrt !== null || parsedColor !== null;
+
+            if (hasAnyMetafield) {
+              await updateShopifyVariantMetafields({
+                productId: item.productId,
+                variantId: item.variantId,
+                weight: parsedWeight,
+                karat: parsedKarat,
+                shape: parsedShape,
+                crt: parsedCrt,
+                color: parsedColor,
+              });
+            }
+          }
+
+          // 2. Update the price
+          await updateShopifyVariantPrice(item.productId, item.variantId, item.newPrice.toString());
+          successCount++;
+        } catch (err) {
+          failCount++;
+          errors.push(`${item.productTitle} (${item.variantTitle}): ${err.message}`);
+        }
+      }
+
+      if (successCount > 0) {
+        await addLog({
+          status: failCount > 0 ? 'failed' : 'success',
+          type: 'bulk',
+          details: `Manual Sync: updated ${successCount} variant prices + metafields.${failCount > 0 ? ` Failed: ${failCount}.` : ''}`,
+          productsUpdated: successCount,
+        });
+      }
+
       return NextResponse.json({
-        success: result.success,
-        successCount: result.successCount,
-        failCount: result.failCount,
-        errors: result.errors,
+        success: failCount === 0,
+        successCount,
+        failCount,
+        errors,
       });
     }
 
