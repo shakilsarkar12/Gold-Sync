@@ -9,6 +9,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const readOnly = false; // Settings are editable at runtime
+  // Snapshot of last saved settings from DB, used to detect changes
+  const [savedSettings, setSavedSettings] = useState(null);
   
   const [settings, setSettings] = useState({
     shopifyShop: '',
@@ -95,6 +97,7 @@ export default function SettingsPage() {
           }
         };
         setSettings(mergedData);
+        setSavedSettings(mergedData);
       } catch (error) {
         showToast(error.message || 'Error loading configurations', 'error');
       } finally {
@@ -197,8 +200,28 @@ export default function SettingsPage() {
     });
   };
 
+  // Pricing-related keys — only trigger sync if these change
+  const PRICING_KEYS = [
+    'gstPercentage', 'makingChargePerGram', 'makingChargeFixed',
+    'fixedMarkup', 'markupPercentage', 'diamondPrices',
+  ];
+
+  // Deep-equal check (JSON stringify is sufficient for flat/nested numbers)
+  const deepEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  // True when any field differs from what was last saved to DB
+  const hasChanges = savedSettings
+    ? !deepEqual(settings, savedSettings)
+    : false;
+
+  // True when any pricing / diamond field has changed
+  const hasPricingChanges = savedSettings
+    ? PRICING_KEYS.some((key) => !deepEqual(settings[key], savedSettings[key]))
+    : false;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!hasChanges) return;
     setSaving(true);
     try {
       const res = await fetch('/api/settings', {
@@ -212,10 +235,14 @@ export default function SettingsPage() {
         throw new Error(errData.error || 'Failed to save settings');
       }
 
+      // Update the saved snapshot so button becomes disabled again
+      setSavedSettings(settings);
       showToast('Settings saved successfully', 'success');
 
-      // Trigger an immediate sync after settings change so prices update right away
-      fetch('/api/sync-now', { method: 'POST' }).catch(() => {});
+      // Only trigger auto-sync if pricing or diamond matrix fields changed
+      if (hasPricingChanges) {
+        fetch('/api/sync-now', { method: 'POST' }).catch(() => {});
+      }
     } catch (error) {
       showToast(error.message || 'Error updating settings', 'error');
     } finally {
@@ -881,7 +908,7 @@ export default function SettingsPage() {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
+            <button type="submit" className="btn btn-primary" disabled={saving || !hasChanges} title={!hasChanges ? 'No changes to save' : ''}>
               <Save size={16} className={saving ? 'animate-spin' : ''} />
               <span>{saving ? 'Saving...' : 'Save Settings'}</span>
             </button>
