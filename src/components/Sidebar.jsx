@@ -1,11 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Gem, History, Settings, Coins } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { LayoutDashboard, Gem, History, Settings, Coins, LogOut } from 'lucide-react';
+import { useToast } from '@/components/Toast';
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { showToast } = useToast();
 
   const navItems = [
     { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -13,6 +16,19 @@ export default function Sidebar() {
     { href: '/history', label: 'Sync History', icon: History },
     { href: '/settings', label: 'Settings', icon: Settings },
   ];
+
+  const handleLogout = async () => {
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST' });
+      if (response.ok) {
+        showToast('Logged out successfully', 'success');
+        router.push('/login');
+        router.refresh();
+      }
+    } catch (err) {
+      showToast('Error logging out', 'error');
+    }
+  };
 
   return (
     <aside className="sidebar">
@@ -35,6 +51,10 @@ export default function Sidebar() {
             </Link>
           );
         })}
+        <button onClick={handleLogout} className="nav-link" style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', marginTop: '1rem', color: '#ef4444' }}>
+          <LogOut size={18} />
+          <span>Logout</span>
+        </button>
       </nav>
       <div style={{ marginTop: 'auto', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
         <span>Shopify Integration v1.0</span>

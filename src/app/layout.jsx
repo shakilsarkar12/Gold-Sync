@@ -1,7 +1,5 @@
 import './globals.css';
-import Sidebar from '@/components/Sidebar';
 import { ToastProvider } from '@/components/Toast';
-import AutoSyncBanner from '@/components/AutoSyncBanner';
 
 export const metadata = {
   title: 'Gold Price Sync Dashboard - Shopify Integration',
@@ -13,13 +11,7 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body>
         <ToastProvider>
-          <AutoSyncBanner />
-          <div className="app-container">
-            <Sidebar />
-            <main className="main-content">
-              {children}
-            </main>
-          </div>
+          {children}
         </ToastProvider>
       </body>
     </html>
