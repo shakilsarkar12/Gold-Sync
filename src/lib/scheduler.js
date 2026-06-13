@@ -1,4 +1,4 @@
-import { getSettings, getSchedulerState, saveSchedulerState } from './db';
+import { getSettings, getSchedulerState, saveSchedulerState, getSyncStatus } from './db';
 import { runProductSync } from './sync';
 
 export function initScheduler() {
@@ -59,6 +59,45 @@ export function initScheduler() {
       }
 
       const isScheduledTime = syncTimes.includes(formattedTime);
+
+      // Check for pending bulk operation if syncing
+      const syncStatus = await getSyncStatus();
+      if (syncStatus.syncing && syncStatus.bulkOperationId) {
+        const { getCurrentBulkOperation } = await import('./shopify');
+        try {
+          const bulkOp = await getCurrentBulkOperation();
+          if (bulkOp && bulkOp.id === syncStatus.bulkOperationId) {
+            if (bulkOp.status === 'COMPLETED' || bulkOp.status === 'FAILED' || bulkOp.status === 'CANCELED') {
+              const success = bulkOp.status === 'COMPLETED';
+              const successCount = success ? syncStatus.totalItems : 0;
+              const failCount = success ? 0 : syncStatus.totalItems;
+              
+              const { setSyncStatus, addLog } = await import('./db');
+              await setSyncStatus({
+                syncing: false,
+                bulkOperationId: null,
+                completedAt: new Date().toISOString(),
+                lastResult: {
+                  success,
+                  successCount,
+                  failCount,
+                  isAuto: syncStatus.isAuto || false,
+                },
+              });
+              
+              await addLog({
+                status: success ? 'success' : 'failed',
+                type: 'bulk',
+                details: `Bulk Operation ${success ? 'completed successfully' : 'failed'} for ${syncStatus.totalItems || 'many'} variants.`,
+                productsUpdated: successCount,
+              });
+              console.log(`[Scheduler] Bulk Operation ${bulkOp.id} finished with status: ${bulkOp.status}`);
+            }
+          }
+        } catch (error) {
+          console.error('[Scheduler] Error polling bulk operation:', error);
+        }
+      }
 
       if (isScheduledTime) {
         // Read lastSyncTime from DB (persists across hot-reloads and restarts)

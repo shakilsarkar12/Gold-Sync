@@ -230,6 +230,35 @@ export async function runProductSync(isAuto = false) {
   }
 
   const productIds = Object.keys(groupedByProduct);
+
+  if (outOfSyncItems.length >= 250) {
+    try {
+      let jsonlString = '';
+      for (const pid of productIds) {
+        const items = groupedByProduct[pid];
+        const variants = items.map(item => ({ id: item.variantId, price: item.newPrice.toString() }));
+        jsonlString += JSON.stringify({ productId: pid, variants }) + '\n';
+      }
+
+      const { runBulkProductVariantsUpdate } = await import('./shopify');
+      const bulkOperationId = await runBulkProductVariantsUpdate(jsonlString);
+
+      await setSyncStatus({
+        syncing: true,
+        isAuto,
+        totalItems: outOfSyncItems.length,
+        completedItems: 0,
+        bulkOperationId,
+      });
+
+      // Skip the synchronous loop below
+      return { success: true, bulkOperationId, isAuto };
+    } catch (error) {
+      console.error("Bulk sync error:", error);
+      await setSyncStatus({ syncing: false, lastResult: { success: false, error: error.message } });
+      return { success: false, error: error.message };
+    }
+  }
   
   for (let i = 0; i < productIds.length; i++) {
     const pid = productIds[i];

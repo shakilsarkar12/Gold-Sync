@@ -41,7 +41,9 @@ async function refreshShopifyToken(shop) {
   return data.access_token;
 }
 
-async function shopifyGraphQL(query, variables = {}) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function shopifyGraphQL(query, variables = {}, retries = 3) {
   const settings = await getSettings();
   const shop = settings.shopifyShop;
 
@@ -72,26 +74,45 @@ async function shopifyGraphQL(query, variables = {}) {
 
   const url = `https://${cleanShop}/admin/api/2024-04/graphql.json`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'X-Shopify-Access-Token': token,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+  for (let i = 0; i <= retries; i++) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, variables }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Shopify API returned status ${response.status}: ${errorText || response.statusText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      // On 429 Too Many Requests, retry as well
+      if (response.status === 429 && i < retries) {
+        console.warn(`[Shopify] 429 Too Many Requests. Retrying in ${2000 * (i + 1)}ms...`);
+        await sleep(2000 * (i + 1));
+        continue;
+      }
+      throw new Error(`Shopify API returned status ${response.status}: ${errorText || response.statusText}`);
+    }
+
+    const result = await response.json();
+    if (result.errors) {
+      const isThrottled = result.errors.some(e => 
+        e.message === 'Throttled' || 
+        (e.extensions && e.extensions.code === 'THROTTLED')
+      );
+      
+      if (isThrottled && i < retries) {
+        console.warn(`[Shopify GraphQL] Throttled. Retrying in ${2000 * (i + 1)}ms...`);
+        await sleep(2000 * (i + 1));
+        continue;
+      }
+      
+      throw new Error(`Shopify GraphQL error: ${result.errors.map((e) => e.message).join(', ')}`);
+    }
+
+    return result.data;
   }
-
-  const result = await response.json();
-  if (result.errors) {
-    throw new Error(`Shopify GraphQL error: ${result.errors.map((e) => e.message).join(', ')}`);
-  }
-
-  return result.data;
 }
 
 export async function fetchShopifyProducts(searchQuery) {
@@ -406,7 +427,9 @@ export async function fetchShopifyProducts(searchQuery) {
       const edges = productsPage?.edges || [];
 
       // Map initial page of variants and collect products needing more variant pages
-      const mappedProducts = await Promise.all(edges.map(async ({ node }) => {
+      const mappedProducts = [];
+      for (const edge of edges) {
+        const { node } = edge;
         const weightValue = node.weightMetafield?.value ? parseFloat(node.weightMetafield.value) : null;
         const karatValue = node.karatMetafield?.value || null;
         const diamondPrice = node.diamondMetafield?.value ? parseFloat(node.diamondMetafield.value) : 0;
@@ -423,7 +446,7 @@ export async function fetchShopifyProducts(searchQuery) {
         // Only keep variants that have a "Gold" selectedOption (e.g. 14K, 18K)
         const goldVariants = variants.filter((v) => v.isGoldVariant);
 
-        return {
+        mappedProducts.push({
           id: node.id,
           title: node.title,
           handle: node.handle,
@@ -437,8 +460,8 @@ export async function fetchShopifyProducts(searchQuery) {
           diamondMetafieldId: node.diamondMetafield?.id,
           variants: goldVariants,
           _hasGoldVariants: goldVariants.length > 0,
-        };
-      }));
+        });
+      }
 
       // Only include products that have at least one variant with a "Gold" option
       const goldProducts = mappedProducts.filter((p) => p._hasGoldVariants);
@@ -462,7 +485,6 @@ export async function fetchShopifyProducts(searchQuery) {
   }
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function updateShopifyVariantPricesBulk(productId, variantsUpdates) {
   // variantsUpdates should be an array of { id: variantId, price: newPrice }
@@ -686,4 +708,98 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
   }
 
   return true;
+}
+
+export async function runBulkProductVariantsUpdate(jsonlString) {
+  // 1. Get staged upload target
+  const stagedQuery = `
+    mutation {
+      stagedUploadsCreate(input: [{
+        resource: BULK_MUTATION_VARIABLES,
+        filename: "bulk_updates.jsonl",
+        mimeType: "text/jsonl",
+        httpMethod: POST
+      }]) {
+        stagedTargets {
+          url
+          resourceUrl
+          parameters {
+            name
+            value
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `;
+  const stagedData = await shopifyGraphQL(stagedQuery);
+  const target = stagedData.stagedUploadsCreate?.stagedTargets?.[0];
+  if (!target) {
+    throw new Error(`Failed to create staged upload: ${JSON.stringify(stagedData.stagedUploadsCreate?.userErrors)}`);
+  }
+
+  // 2. Upload the JSONL file
+  const formData = new FormData();
+  for (const param of target.parameters) {
+    formData.append(param.name, param.value);
+  }
+  formData.append('file', new Blob([jsonlString], { type: 'text/jsonl' }), 'bulk_updates.jsonl');
+
+  const uploadRes = await fetch(target.url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Failed to upload to Shopify staged target: ${uploadRes.status} ${errText}`);
+  }
+
+  // 3. Trigger bulk operation
+  const bulkMutation = `
+    mutation bulkOperationRunMutation($stagedUploadPath: String!) {
+      bulkOperationRunMutation(
+        mutation: "mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) { productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { message } } }",
+        stagedUploadPath: $stagedUploadPath
+      ) {
+        bulkOperation {
+          id
+          url
+          status
+        }
+        userErrors {
+          message
+        }
+      }
+    }
+  `;
+  const bulkData = await shopifyGraphQL(bulkMutation, { stagedUploadPath: target.resourceUrl });
+  const bulkOp = bulkData.bulkOperationRunMutation?.bulkOperation;
+  const userErrs = bulkData.bulkOperationRunMutation?.userErrors;
+
+  if (userErrs && userErrs.length > 0) {
+    throw new Error(`Bulk Operation Trigger Error: ${userErrs.map(e => e.message).join(', ')}`);
+  }
+
+  return bulkOp.id;
+}
+
+export async function getCurrentBulkOperation() {
+  const query = `
+    query {
+      currentBulkOperation {
+        id
+        status
+        errorCode
+        createdAt
+        completedAt
+        objectCount
+        fileSize
+        url
+        partialDataUrl
+      }
+    }
+  `;
+  const data = await shopifyGraphQL(query);
+  return data.currentBulkOperation;
 }
