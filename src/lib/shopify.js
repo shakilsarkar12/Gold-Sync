@@ -454,8 +454,8 @@ export async function fetchShopifyProducts(searchQuery) {
     return allProducts;
   } catch (error) {
     const settings = await getSettings();
-    if (!settings.shopifyShop || !settings.shopifyAccessToken) {
-      console.warn('Shopify credentials not fully configured. Returning empty list.');
+    if (!settings.shopifyShop) {
+      console.warn('Shopify store URL not configured. Returning empty list.');
       return [];
     }
     throw error;

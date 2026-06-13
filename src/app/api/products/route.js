@@ -16,10 +16,10 @@ export async function GET() {
     initScheduler(); // Initialize background auto-sync scheduler if not already running
     const settings = await getSettings();
     
-    if (!settings.shopifyShop || !settings.shopifyAccessToken) {
+    if (!settings.shopifyShop) {
       return NextResponse.json({
         products: [],
-        warning: 'Shopify is not configured. Please visit the Settings page.',
+        warning: 'Shopify Store URL is not configured. Please visit the Settings page.',
       });
     }
 

@@ -125,8 +125,8 @@ export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, ra
 export async function runProductSync(isAuto = false) {
   const settings = await getSettings();
   
-  if (!settings.shopifyShop || !settings.shopifyAccessToken) {
-    throw new Error('Shopify credentials are not configured.');
+  if (!settings.shopifyShop) {
+    throw new Error('Shopify Store URL is not configured.');
   }
 
   // Mark sync as running in DB so the frontend can poll and show the banner
