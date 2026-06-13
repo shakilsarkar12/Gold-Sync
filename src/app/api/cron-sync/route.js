@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getSettings, getSchedulerState, saveSchedulerState } from '@/lib/db';
 import { runProductSync } from '@/lib/sync';
 
+export const maxDuration = 300; // Allow Vercel up to 5 minutes to complete the sync
+
+
 export async function GET(request) {
   // Security Check: Verify the request comes from Vercel Cron.
   // Vercel appends an Authorization header with Bearer token if CRON_SECRET is configured.

@@ -1,6 +1,6 @@
 import { getSettings, addLog, setSyncStatus } from './db';
 import { fetchLiveGoldRates } from './goldapi';
-import { fetchShopifyProducts, updateShopifyVariantPrice, updateShopifyVariantMetafields } from './shopify';
+import { fetchShopifyProducts, updateShopifyVariantPricesBulk, updateShopifyVariantMetafieldsBulk } from './shopify';
 
 // Helper to calculate pricing based on weight, karat, diamond price, rates, and settings
 export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, rates, settings, variantTitle) {
@@ -220,40 +220,65 @@ export async function runProductSync(isAuto = false) {
   let failCount = 0;
   const errors = [];
   
-  for (let i = 0; i < outOfSyncItems.length; i++) {
-    const item = outOfSyncItems[i];
+  // Group outOfSyncItems by productId
+  const groupedByProduct = {};
+  for (const item of outOfSyncItems) {
+    if (!groupedByProduct[item.productId]) {
+      groupedByProduct[item.productId] = [];
+    }
+    groupedByProduct[item.productId].push(item);
+  }
+
+  const productIds = Object.keys(groupedByProduct);
+  
+  for (let i = 0; i < productIds.length; i++) {
+    const pid = productIds[i];
+    const items = groupedByProduct[pid];
+    
     try {
-      // Save current metafield values to Shopify before updating price
-      if (item.metafields) {
-        const mf = item.metafields;
-        const hasAnyMetafield = mf.weight !== null || mf.karat !== null ||
-          mf.shape !== null || mf.crt !== null || mf.color !== null;
-        if (hasAnyMetafield) {
-          await updateShopifyVariantMetafields({
-            productId: item.productId,
-            variantId: item.variantId,
-            weight: mf.weight !== null ? mf.weight : null,
-            karat: mf.karat || null,
-            shape: mf.shape || null,
-            crt: mf.crt !== null ? mf.crt : null,
-            color: mf.color || null,
-          });
+      // Prepare bulk metafields
+      const metafieldsData = [];
+      for (const item of items) {
+        if (item.metafields) {
+          const mf = item.metafields;
+          const hasAnyMetafield = mf.weight !== null || mf.karat !== null ||
+            mf.shape !== null || mf.crt !== null || mf.color !== null;
+          if (hasAnyMetafield) {
+            metafieldsData.push({
+              variantId: item.variantId,
+              weight: mf.weight !== null ? mf.weight : null,
+              karat: mf.karat || null,
+              shape: mf.shape || null,
+              crt: mf.crt !== null ? mf.crt : null,
+              color: mf.color || null,
+            });
+          }
         }
       }
-      await updateShopifyVariantPrice(item.productId, item.variantId, item.newPrice.toString());
-      successCount++;
+      
+      if (metafieldsData.length > 0) {
+         await updateShopifyVariantMetafieldsBulk(metafieldsData);
+      }
+      
+      const priceUpdates = items.map(item => ({
+        id: item.variantId,
+        price: item.newPrice.toString()
+      }));
+      
+      await updateShopifyVariantPricesBulk(pid, priceUpdates);
+      successCount += items.length;
     } catch (error) {
-      failCount++;
-      errors.push(`${item.productTitle} (${item.variantTitle}): ${error.message}`);
+      failCount += items.length;
+      errors.push(`Failed product ${pid}: ${error.message}`);
     }
     
     // Update progress periodically
-    if ((i + 1) % 5 === 0 || i === outOfSyncItems.length - 1) {
+    if ((i + 1) % 5 === 0 || i === productIds.length - 1) {
       await setSyncStatus({
         syncing: true,
         isAuto,
         totalItems: outOfSyncItems.length,
-        completedItems: i + 1,
+        completedItems: successCount + failCount,
       });
     }
   }

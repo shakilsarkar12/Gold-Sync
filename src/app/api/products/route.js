@@ -3,9 +3,9 @@ import { getSettings, addLog } from '@/lib/db';
 import { fetchLiveGoldRates } from '@/lib/goldapi';
 import {
   fetchShopifyProducts,
-  updateShopifyVariantPrice,
+  updateShopifyVariantPricesBulk,
   updateShopifyProductMetafields,
-  updateShopifyVariantMetafields,
+  updateShopifyVariantMetafieldsBulk,
 } from '@/lib/shopify';
 import { calculateVariantPrice, runProductSync } from '@/lib/sync';
 import { initScheduler } from '@/lib/scheduler';
@@ -120,15 +120,14 @@ export async function POST(request) {
         const parsedCrt = crt !== undefined && crt !== '' ? parseFloat(crt) : null;
         const parsedColor = color !== undefined && color !== '' ? color : null;
 
-        await updateShopifyVariantMetafields({
-          productId,
+        await updateShopifyVariantMetafieldsBulk([{
           variantId,
           weight: parsedWeight,
           karat: parsedKarat,
           shape: parsedShape,
           crt: parsedCrt,
           color: parsedColor,
-        });
+        }]);
 
         return NextResponse.json({ success: true, message: 'Variant metafields updated successfully' });
       } else {
@@ -166,20 +165,19 @@ export async function POST(request) {
           parsedShape !== null || parsedCrt !== null || parsedColor !== null;
 
         if (hasAnyMetafield) {
-          await updateShopifyVariantMetafields({
-            productId,
+          await updateShopifyVariantMetafieldsBulk([{
             variantId,
             weight: parsedWeight,
             karat: parsedKarat,
             shape: parsedShape,
             crt: parsedCrt,
             color: parsedColor,
-          });
+          }]);
         }
       }
 
       // 2. Update the variant price in Shopify
-      await updateShopifyVariantPrice(productId, variantId, newPrice.toString());
+      await updateShopifyVariantPricesBulk(productId, [{ id: variantId, price: newPrice.toString() }]);
       
       await addLog({
         status: 'success',
@@ -226,20 +224,19 @@ export async function POST(request) {
               parsedShape !== null || parsedCrt !== null || parsedColor !== null;
 
             if (hasAnyMetafield) {
-              await updateShopifyVariantMetafields({
-                productId: item.productId,
+              await updateShopifyVariantMetafieldsBulk([{
                 variantId: item.variantId,
                 weight: parsedWeight,
                 karat: parsedKarat,
                 shape: parsedShape,
                 crt: parsedCrt,
                 color: parsedColor,
-              });
+              }]);
             }
           }
 
           // 2. Update the price
-          await updateShopifyVariantPrice(item.productId, item.variantId, item.newPrice.toString());
+          await updateShopifyVariantPricesBulk(item.productId, [{ id: item.variantId, price: item.newPrice.toString() }]);
           successCount++;
         } catch (err) {
           failCount++;

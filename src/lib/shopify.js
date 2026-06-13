@@ -61,14 +61,15 @@ export async function fetchShopifyProducts(searchQuery) {
   const diamondColorNamespace = settings.diamondColorNamespace || 'custom';
   const diamondColorKey = settings.diamondColorKey || 'diamond_color';
 
-  let shopifyQuery = '';
+  let shopifyQuery = 'status:ACTIVE';
   if (searchQuery) {
-    shopifyQuery = searchQuery;
+    shopifyQuery = `status:ACTIVE AND ${searchQuery}`;
   }
 
   const query = `
     query GetProducts(
       $first: Int!
+      $after: String
       $query: String
       $weightNamespace: String!
       $weightKey: String!
@@ -87,7 +88,11 @@ export async function fetchShopifyProducts(searchQuery) {
       $diamondColorNamespace: String!
       $diamondColorKey: String!
     ) {
-      products(first: $first, query: $query) {
+      products(first: $first, after: $after, query: $query) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
         edges {
           node {
             id
@@ -157,8 +162,9 @@ export async function fetchShopifyProducts(searchQuery) {
     }
   `;
 
-  const variables = {
+  const getVariables = (afterCursor) => ({
     first: 100,
+    after: afterCursor,
     query: shopifyQuery || null,
     weightNamespace,
     weightKey,
@@ -176,7 +182,7 @@ export async function fetchShopifyProducts(searchQuery) {
     diamondCrtKey,
     diamondColorNamespace,
     diamondColorKey,
-  };
+  });
 
   // Helper to extract diamond carats and gold karat from variant title
   // Title format examples: "Yellow gold / 1.5ct / 18K", "White gold / 1ct / 14kt", "2ct / 18k"
@@ -224,7 +230,6 @@ export async function fetchShopifyProducts(searchQuery) {
       colorMetafieldId: variant.vColorMetafield?.id,
     };
   }
-
 
   // Helper to paginate ALL variants for a single product using cursor
   async function fetchRemainingVariants(productId, afterCursor) {
@@ -319,41 +324,53 @@ export async function fetchShopifyProducts(searchQuery) {
   }
 
   try {
-    const data = await shopifyGraphQL(query, variables);
-    const edges = data.products?.edges || [];
+    const allProducts = [];
+    let hasMoreProducts = true;
+    let productCursor = null;
 
-    // Map initial page of variants and collect products needing more variant pages
-    const products = await Promise.all(edges.map(async ({ node }) => {
-      const weightValue = node.weightMetafield?.value ? parseFloat(node.weightMetafield.value) : null;
-      const karatValue = node.karatMetafield?.value || null;
-      const diamondPrice = node.diamondMetafield?.value ? parseFloat(node.diamondMetafield.value) : 0;
+    while (hasMoreProducts) {
+      const data = await shopifyGraphQL(query, getVariables(productCursor));
+      const productsPage = data.products;
+      const edges = productsPage?.edges || [];
 
-      const variantsPage = node.variants;
-      let variants = (variantsPage?.edges || []).map(({ node: variant }) => mapVariant(variant));
+      // Map initial page of variants and collect products needing more variant pages
+      const mappedProducts = await Promise.all(edges.map(async ({ node }) => {
+        const weightValue = node.weightMetafield?.value ? parseFloat(node.weightMetafield.value) : null;
+        const karatValue = node.karatMetafield?.value || null;
+        const diamondPrice = node.diamondMetafield?.value ? parseFloat(node.diamondMetafield.value) : 0;
 
-      // If there are more variant pages, fetch them all
-      if (variantsPage?.pageInfo?.hasNextPage) {
-        const extraVariants = await fetchRemainingVariants(node.id, variantsPage.pageInfo.endCursor);
-        variants = [...variants, ...extraVariants];
-      }
+        const variantsPage = node.variants;
+        let variants = (variantsPage?.edges || []).map(({ node: variant }) => mapVariant(variant));
 
-      return {
-        id: node.id,
-        title: node.title,
-        handle: node.handle,
-        tags: node.tags || [],
-        featuredImage: node.featuredImage ? { url: node.featuredImage.url } : null,
-        weightValue,
-        karatValue,
-        diamondPrice,
-        weightMetafieldId: node.weightMetafield?.id,
-        karatMetafieldId: node.karatMetafield?.id,
-        diamondMetafieldId: node.diamondMetafield?.id,
-        variants,
-      };
-    }));
+        // If there are more variant pages, fetch them all
+        if (variantsPage?.pageInfo?.hasNextPage) {
+          const extraVariants = await fetchRemainingVariants(node.id, variantsPage.pageInfo.endCursor);
+          variants = [...variants, ...extraVariants];
+        }
 
-    return products;
+        return {
+          id: node.id,
+          title: node.title,
+          handle: node.handle,
+          tags: node.tags || [],
+          featuredImage: node.featuredImage ? { url: node.featuredImage.url } : null,
+          weightValue,
+          karatValue,
+          diamondPrice,
+          weightMetafieldId: node.weightMetafield?.id,
+          karatMetafieldId: node.karatMetafield?.id,
+          diamondMetafieldId: node.diamondMetafield?.id,
+          variants,
+        };
+      }));
+
+      allProducts.push(...mappedProducts);
+
+      hasMoreProducts = productsPage?.pageInfo?.hasNextPage || false;
+      productCursor = productsPage?.pageInfo?.endCursor || null;
+    }
+
+    return allProducts;
   } catch (error) {
     const settings = await getSettings();
     if (!settings.shopifyShop || !settings.shopifyAccessToken) {
@@ -364,7 +381,12 @@ export async function fetchShopifyProducts(searchQuery) {
   }
 }
 
-export async function updateShopifyVariantPrice(productId, variantId, newPrice) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function updateShopifyVariantPricesBulk(productId, variantsUpdates) {
+  // variantsUpdates should be an array of { id: variantId, price: newPrice }
+  if (!variantsUpdates || variantsUpdates.length === 0) return true;
+
   const mutation = `
     mutation ProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
       productVariantsBulkUpdate(productId: $productId, variants: $variants) {
@@ -382,12 +404,7 @@ export async function updateShopifyVariantPrice(productId, variantId, newPrice) 
 
   const variables = {
     productId,
-    variants: [
-      {
-        id: variantId,
-        price: newPrice,
-      },
-    ],
+    variants: variantsUpdates,
   };
 
   const data = await shopifyGraphQL(mutation, variables);
@@ -396,6 +413,9 @@ export async function updateShopifyVariantPrice(productId, variantId, newPrice) 
   if (errors.length > 0) {
     throw new Error(`Shopify Variant Update Error: ${errors.map((e) => e.message).join(', ')}`);
   }
+
+  // Sleep slightly to avoid token bucket exhaustion
+  await sleep(250);
 
   return true;
 }
@@ -471,7 +491,10 @@ export async function updateShopifyProductMetafields(productId, weight, karat, d
   return true;
 }
 
-export async function updateShopifyVariantMetafields({ productId, variantId, weight, karat, shape, crt, color }) {
+export async function updateShopifyVariantMetafieldsBulk(variantsData) {
+  // variantsData should be an array of: { variantId, weight, karat, shape, crt, color }
+  if (!variantsData || variantsData.length === 0) return true;
+
   const settings = await getSettings();
   
   const variantWeightNamespace = settings.variantWeightNamespace || 'custom';
@@ -506,66 +529,79 @@ export async function updateShopifyVariantMetafields({ productId, variantId, wei
     }
   `;
 
-  const metafields = [];
+  let allMetafields = [];
 
-  if (weight !== null && weight !== undefined) {
-    metafields.push({
-      ownerId: variantId,
-      namespace: variantWeightNamespace,
-      key: variantWeightKey,
-      value: weight.toString(),
-      type: 'single_line_text_field',
-    });
+  for (const data of variantsData) {
+    const { variantId, weight, karat, shape, crt, color } = data;
+
+    if (weight !== null && weight !== undefined) {
+      allMetafields.push({
+        ownerId: variantId,
+        namespace: variantWeightNamespace,
+        key: variantWeightKey,
+        value: weight.toString(),
+        type: 'single_line_text_field',
+      });
+    }
+
+    if (karat !== null && karat !== undefined) {
+      allMetafields.push({
+        ownerId: variantId,
+        namespace: variantKaratNamespace,
+        key: variantKaratKey,
+        value: karat.trim(),
+        type: 'single_line_text_field',
+      });
+    }
+
+    if (shape !== null && shape !== undefined) {
+      allMetafields.push({
+        ownerId: variantId,
+        namespace: diamondShapeNamespace,
+        key: diamondShapeKey,
+        value: shape.trim(),
+        type: 'single_line_text_field',
+      });
+    }
+
+    if (crt !== null && crt !== undefined) {
+      allMetafields.push({
+        ownerId: variantId,
+        namespace: diamondCrtNamespace,
+        key: diamondCrtKey,
+        value: crt.toString(),
+        type: 'single_line_text_field',
+      });
+    }
+
+    if (color !== null && color !== undefined) {
+      allMetafields.push({
+        ownerId: variantId,
+        namespace: diamondColorNamespace,
+        key: diamondColorKey,
+        value: color.trim(),
+        type: 'single_line_text_field',
+      });
+    }
   }
 
-  if (karat !== null && karat !== undefined) {
-    metafields.push({
-      ownerId: variantId,
-      namespace: variantKaratNamespace,
-      key: variantKaratKey,
-      value: karat.trim(),
-      type: 'single_line_text_field',
-    });
-  }
+  if (allMetafields.length === 0) return true;
 
-  if (shape !== null && shape !== undefined) {
-    metafields.push({
-      ownerId: variantId,
-      namespace: diamondShapeNamespace,
-      key: diamondShapeKey,
-      value: shape.trim(),
-      type: 'single_line_text_field',
-    });
-  }
+  // Shopify allows max 25 metafields per metafieldsSet mutation
+  const CHUNK_SIZE = 25;
+  for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
+    const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
+    const variables = { metafields: chunk };
+    
+    const response = await shopifyGraphQL(mutation, variables);
+    const errors = response.metafieldsSet?.userErrors || [];
 
-  if (crt !== null && crt !== undefined) {
-    metafields.push({
-      ownerId: variantId,
-      namespace: diamondCrtNamespace,
-      key: diamondCrtKey,
-      value: crt.toString(),
-      type: 'single_line_text_field',
-    });
-  }
+    if (errors.length > 0) {
+      throw new Error(`Shopify Variant Metafields Set Error: ${errors.map((e) => e.message).join(', ')}`);
+    }
 
-  if (color !== null && color !== undefined) {
-    metafields.push({
-      ownerId: variantId,
-      namespace: diamondColorNamespace,
-      key: diamondColorKey,
-      value: color.trim(),
-      type: 'single_line_text_field',
-    });
-  }
-
-  if (metafields.length === 0) return true;
-
-  const variables = { metafields };
-  const data = await shopifyGraphQL(mutation, variables);
-  const errors = data.metafieldsSet?.userErrors || [];
-
-  if (errors.length > 0) {
-    throw new Error(`Shopify Variant Metafields Set Error: ${errors.map((e) => e.message).join(', ')}`);
+    // Sleep slightly to avoid token bucket exhaustion
+    await sleep(250);
   }
 
   return true;

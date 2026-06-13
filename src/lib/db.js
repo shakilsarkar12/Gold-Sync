@@ -53,9 +53,6 @@ const DEFAULT_SETTINGS = {
   }
 };
 
-let client = null;
-let db = null;
-
 async function connectToDatabase() {
   const uri = process.env.DB_URI;
   if (!uri) {
@@ -63,17 +60,28 @@ async function connectToDatabase() {
     return null;
   }
 
-  if (db) return db;
-
   try {
-    if (!client) {
-      client = new MongoClient(uri);
-      await client.connect();
+    if (!global._mongoClient) {
+      global._mongoClient = new MongoClient(uri);
     }
-    db = client.db('GoldSync'); // Connects to the GoldSync database
-    return db;
+    
+    // Ensure connection is active
+    try {
+      await global._mongoClient.connect();
+      // Test the connection
+      await global._mongoClient.db('admin').command({ ping: 1 });
+    } catch (e) {
+      // Reconnect if topology is closed or other errors
+      console.warn('MongoDB connection issue, reconnecting...', e.message);
+      global._mongoClient = new MongoClient(uri);
+      await global._mongoClient.connect();
+      await global._mongoClient.db('admin').command({ ping: 1 });
+    }
+    
+    return global._mongoClient.db('GoldSync');
   } catch (error) {
-    console.error('Failed to connect to MongoDB, falling back to file storage:', error);
+    console.error('Failed to connect to MongoDB, falling back to file storage:', error.message);
+    global._mongoClient = null; // Clear the broken client so we don't reuse it
     return null;
   }
 }

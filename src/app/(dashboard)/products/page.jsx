@@ -8,7 +8,9 @@ import {
   AlertCircle,
   ArrowUpRight,
   Save,
-  HelpCircle
+  HelpCircle,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 export default function ProductsPage() {
@@ -21,6 +23,9 @@ export default function ProductsPage() {
   const [currency, setCurrency] = useState('USD');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('all'); // all, gold, out_of_sync, synced
+  
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 100;
   
   // State for product-level edits: { [productId]: { weight, karat, diamondPrice } }
   const [editedMetafields, setEditedMetafields] = useState({});
@@ -272,6 +277,26 @@ export default function ProductsPage() {
     return true; // all
   });
 
+  // Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterType]);
+
+  // Flatten products and variants into a single list of rows for exact pagination
+  const allRows = [];
+  filteredProducts.forEach((product) => {
+    allRows.push({ type: 'product', data: product });
+    product.variants.forEach((variant) => {
+      allRows.push({ type: 'variant', product, data: variant });
+    });
+  });
+
+  const totalPages = Math.ceil(allRows.length / itemsPerPage);
+  const currentRows = allRows.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   // Count out-of-sync variants globally
   let outOfSyncVariantsCount = 0;
   products.forEach((p) => {
@@ -356,17 +381,17 @@ export default function ProductsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredProducts.map((product) => {
-                const edits = editedMetafields[product.id] || { weight: '', karat: '', diamondPrice: '0' };
-                const hasChanges =
-                  edits.weight !== (product.weightValue?.toString() || '') ||
-                  edits.karat !== (product.karatValue || '') ||
-                  parseFloat(edits.diamondPrice || 0) !== (product.diamondPrice || 0);
+              {currentRows.map((row) => {
+                if (row.type === 'product') {
+                  const product = row.data;
+                  const edits = editedMetafields[product.id] || { weight: '', karat: '', diamondPrice: '0' };
+                  const hasChanges =
+                    edits.weight !== (product.weightValue?.toString() || '') ||
+                    edits.karat !== (product.karatValue || '') ||
+                    parseFloat(edits.diamondPrice || 0) !== (product.diamondPrice || 0);
 
-                return (
-                  <React.Fragment key={product.id}>
-                    {/* Product Header Row (Editable Metadata Fields) */}
-                    <tr style={{ background: 'rgba(255, 255, 255, 0.04)', borderBottom: '1px solid var(--border-color)' }}>
+                  return (
+                    <tr key={`prod-${product.id}`} style={{ background: 'rgba(255, 255, 255, 0.04)', borderBottom: '1px solid var(--border-color)' }}>
                       {/* Product Title */}
                       <td style={{ padding: '0.75rem 1.25rem' }}>
                         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -475,30 +500,34 @@ export default function ProductsPage() {
                         </div>
                       </td>
                     </tr>
+                  );
+                } else {
+                  const variant = row.data;
+                  const product = row.product;
+                  const vEdits = editedVariantMetafields[variant.id] || { weight: '', karat: '', shape: '', crt: '', color: '' };
+                  const hasVariantChanges =
+                    vEdits.weight !== (variant.weightValue?.toString() || '') ||
+                    vEdits.karat !== (variant.karatValue || '') ||
+                    vEdits.shape !== (variant.shapeValue || '') ||
+                    vEdits.crt !== (variant.crtValue?.toString() || '') ||
+                    vEdits.color !== (variant.colorValue || '');
 
-                    {/* Variant Sub-rows */}
-                    {product.variants.map((variant) => {
-                      const vEdits = editedVariantMetafields[variant.id] || { weight: '', karat: '', shape: '', crt: '', color: '' };
-                      const hasVariantChanges =
-                        vEdits.weight !== (variant.weightValue?.toString() || '') ||
-                        vEdits.karat !== (variant.karatValue || '') ||
-                        vEdits.shape !== (variant.shapeValue || '') ||
-                        vEdits.crt !== (variant.crtValue?.toString() || '') ||
-                        vEdits.color !== (variant.colorValue || '');
-
-                      return (
-                        <tr key={variant.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
-                          {/* Column 1: Variant Title / SKU */}
-                          <td style={{ paddingLeft: '2.5rem' }}>
-                            <div style={{ fontWeight: 500, fontSize: '0.85rem' }}>
-                              {variant.title}
-                            </div>
-                            {variant.sku && (
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                                SKU: {variant.sku}
-                              </div>
-                            )}
-                          </td>
+                  return (
+                    <tr key={`var-${variant.id}`} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
+                      {/* Column 1: Variant Title / SKU */}
+                      <td style={{ paddingLeft: '2.5rem' }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--gold-primary)', marginBottom: '0.15rem', opacity: 0.8 }}>
+                          {product.title}
+                        </div>
+                        <div style={{ fontWeight: 500, fontSize: '0.85rem' }}>
+                          {variant.title}
+                        </div>
+                        {variant.sku && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                            SKU: {variant.sku}
+                          </div>
+                        )}
+                      </td>
 
                           {/* Gold Weight Input */}
                           <td>
@@ -690,14 +719,69 @@ export default function ProductsPage() {
                               )}
                             </div>
                           </td>
-                        </tr>
-                      );
-                    })}
-                  </React.Fragment>
-                );
+                    </tr>
+                  );
+                }
               })}
             </tbody>
           </table>
+          
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', padding: '1rem', borderTop: '1px solid var(--border-color)', background: 'rgba(255, 255, 255, 0.02)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ 
+                  display: 'flex', 
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)', 
+                  borderRadius: '6px',
+                  overflow: 'hidden'
+                }}>
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    style={{ 
+                      padding: '0.35rem 0.6rem', 
+                      background: 'transparent', 
+                      border: 'none', 
+                      color: currentPage === 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                      cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                      borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'background 0.2s ease'
+                    }}
+                    onMouseOver={(e) => { if (currentPage !== 1) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)' }}
+                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                    style={{ 
+                      padding: '0.35rem 0.6rem', 
+                      background: 'transparent', 
+                      border: 'none', 
+                      color: currentPage === totalPages ? 'var(--text-muted)' : 'var(--text-primary)',
+                      cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'background 0.2s ease'
+                    }}
+                    onMouseOver={(e) => { if (currentPage !== totalPages) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)' }}
+                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+                <div style={{ fontSize: '0.95rem', color: '#6ab0ff', fontWeight: 500, minWidth: '70px' }}>
+                  {(currentPage - 1) * itemsPerPage + 1}-{Math.min(currentPage * itemsPerPage, allRows.length)}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
