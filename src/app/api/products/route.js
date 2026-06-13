@@ -11,7 +11,7 @@ import { calculateVariantPrice, runProductSync } from '@/lib/sync';
 import { initScheduler } from '@/lib/scheduler';
 import { setSyncStatus } from '@/lib/db';
 
-export async function GET() {
+export async function GET(request) {
   try {
     initScheduler(); // Initialize background auto-sync scheduler if not already running
     const settings = await getSettings();
@@ -33,7 +33,10 @@ export async function GET() {
       );
     }
 
-    const products = await fetchShopifyProducts();
+    const url = new URL(request.url);
+    const bypassCache = url.searchParams.get('refresh') === 'true';
+
+    const products = await fetchShopifyProducts(null, bypassCache);
     
     // Enrich variants of each product using variant-level fields, or product-level fallbacks
     const enrichedProducts = products.map((product) => {

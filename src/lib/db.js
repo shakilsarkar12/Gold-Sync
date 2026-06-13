@@ -331,7 +331,67 @@ export async function setSyncStatus(status) {
       console.error('Failed to set sync status in MongoDB:', error);
     }
   }
-  // Fallback for local dev without DB
+// Fallback for local dev without DB
   global.__syncStatus = { ...global.__syncStatus, ...status };
   return status;
+}
+
+export async function getProductsCache() {
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('products_cache');
+      const doc = await collection.findOne({ _id: 'cache' });
+      if (doc) {
+        return { products: doc.products, timestamp: doc.timestamp };
+      }
+      return null;
+    } catch (error) {
+      console.error('Failed to get products cache from MongoDB:', error);
+      return null;
+    }
+  }
+
+  // Fallback
+  const cachePath = path.join(DATA_DIR, 'products_cache.json');
+  try {
+    const data = await fs.readFile(cachePath, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export async function setProductsCache(products) {
+  const cacheData = {
+    products,
+    timestamp: Date.now(),
+  };
+
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('products_cache');
+      await collection.updateOne(
+        { _id: 'cache' },
+        { $set: cacheData },
+        { upsert: true }
+      );
+      return true;
+    } catch (error) {
+      console.error('Failed to save products cache to MongoDB:', error);
+      return false;
+    }
+  }
+
+  // Fallback
+  const cachePath = path.join(DATA_DIR, 'products_cache.json');
+  await ensureDirectory();
+  try {
+    await fs.writeFile(cachePath, JSON.stringify(cacheData), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to write local products_cache.json:', error);
+    return false;
+  }
 }

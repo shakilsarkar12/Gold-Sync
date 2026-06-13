@@ -115,7 +115,20 @@ async function shopifyGraphQL(query, variables = {}, retries = 3) {
   }
 }
 
-export async function fetchShopifyProducts(searchQuery) {
+export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
+  const { getProductsCache, setProductsCache } = await import('./db.js');
+  
+  if (!bypassCache && !searchQuery) {
+    const cache = await getProductsCache();
+    if (cache && cache.products && cache.timestamp) {
+      const ONE_HOUR = 60 * 60 * 1000;
+      if (Date.now() - cache.timestamp < ONE_HOUR) {
+        console.log('[Shopify API] Serving products from cache.');
+        return cache.products;
+      }
+    }
+  }
+
   const settings = await getSettings();
 
   // Product level mappings
@@ -472,6 +485,10 @@ export async function fetchShopifyProducts(searchQuery) {
 
       hasMoreProducts = productsPage?.pageInfo?.hasNextPage || false;
       productCursor = productsPage?.pageInfo?.endCursor || null;
+    }
+
+    if (!searchQuery) {
+      await setProductsCache(allProducts);
     }
 
     return allProducts;

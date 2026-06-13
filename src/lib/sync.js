@@ -140,8 +140,8 @@ export async function runProductSync(isAuto = false) {
   });
   const rates = await fetchLiveGoldRates(true);
   
-  // 2. Fetch all products from Shopify
-  const products = await fetchShopifyProducts();
+  // 2. Fetch all products from Shopify (bypass cache)
+  const products = await fetchShopifyProducts(null, true);
   
   // 3. Find out-of-sync items
   const outOfSyncItems = [];
