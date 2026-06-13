@@ -776,8 +776,9 @@ export default function ProductsPage() {
                     <ChevronRight size={18} />
                   </button>
                 </div>
-                <div style={{ fontSize: '0.95rem', color: '#6ab0ff', fontWeight: 500, minWidth: '70px' }}>
-                  {(currentPage - 1) * itemsPerPage + 1}-{Math.min(currentPage * itemsPerPage, allRows.length)}
+                <div style={{ fontSize: '0.9rem', color: '#6ab0ff', fontWeight: 500, minWidth: '70px' }}>
+                  {(currentPage - 1) * itemsPerPage + 1}–{Math.min(currentPage * itemsPerPage, allRows.length)}
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> of {allRows.length}</span>
                 </div>
               </div>
             </div>

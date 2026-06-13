@@ -1,12 +1,68 @@
-import { getSettings } from './db';
+import { getSettings, updateDynamicToken } from './db';
+
+async function refreshShopifyToken(shop) {
+  const clientId = process.env.SHOPIFY_CLIENT_ID;
+  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('SHOPIFY_CLIENT_ID or SHOPIFY_CLIENT_SECRET is missing from .env');
+  }
+
+  let cleanShop = shop.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  if (!cleanShop.includes('.myshopify.com')) {
+    cleanShop = `${cleanShop}.myshopify.com`;
+  }
+
+  const url = `https://${cleanShop}/admin/oauth/access_token`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to fetch Shopify token: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  if (!data.access_token) {
+    throw new Error('No access token returned from Shopify');
+  }
+
+  await updateDynamicToken(data.access_token);
+  return data.access_token;
+}
 
 async function shopifyGraphQL(query, variables = {}) {
   const settings = await getSettings();
   const shop = settings.shopifyShop;
-  const token = settings.shopifyAccessToken;
 
-  if (!shop || !token) {
-    throw new Error('Shopify credentials are not configured in settings.');
+  if (!shop) {
+    throw new Error('Shopify Store URL is not configured in settings.');
+  }
+
+  const TWENTY_THREE_HOURS = 23 * 60 * 60 * 1000;
+  const lastUpdated = settings.shopifyTokenUpdatedAt || 0;
+  const age = Date.now() - lastUpdated;
+
+  let token = settings.shopifyDynamicToken;
+
+  // If the dynamic token is missing or older than 23 hours, refresh it
+  if (!token || age > TWENTY_THREE_HOURS) {
+    console.log('Fetching new Shopify dynamic token via client credentials...');
+    token = await refreshShopifyToken(shop);
+  }
+
+  if (!token) {
+    throw new Error('Failed to acquire Shopify access token.');
   }
 
   let cleanShop = shop.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
@@ -40,7 +96,7 @@ async function shopifyGraphQL(query, variables = {}) {
 
 export async function fetchShopifyProducts(searchQuery) {
   const settings = await getSettings();
-  
+
   // Product level mappings
   const weightNamespace = settings.weightNamespace || 'custom';
   const weightKey = settings.weightKey || 'gold_weight';
@@ -128,6 +184,10 @@ export async function fetchShopifyProducts(searchQuery) {
                   title
                   price
                   sku
+                  selectedOptions {
+                    name
+                    value
+                  }
                   vWeightMetafield: metafield(namespace: $variantWeightNamespace, key: $variantWeightKey) {
                     id
                     value
@@ -213,11 +273,19 @@ export async function fetchShopifyProducts(searchQuery) {
       ? variant.vKaratMetafield.value
       : titleKarat;
 
+    // Check if variant has an option named "Gold" (e.g. 14K, 18K)
+    const goldOption = (variant.selectedOptions || []).find(
+      (o) => o.name.toLowerCase() === 'gold'
+    );
+
     return {
       id: variant.id,
       title: variant.title,
       price: variant.price,
       sku: variant.sku || null,
+      selectedOptions: variant.selectedOptions || [],
+      isGoldVariant: !!goldOption,
+      goldOptionValue: goldOption ? goldOption.value : null, // e.g. "14K", "18K"
       weightValue: variant.vWeightMetafield?.value ? parseFloat(variant.vWeightMetafield.value) : null,
       karatValue,
       shapeValue: variant.vShapeMetafield?.value || null,
@@ -260,6 +328,10 @@ export async function fetchShopifyProducts(searchQuery) {
                 title
                 price
                 sku
+                selectedOptions {
+                  name
+                  value
+                }
                 vWeightMetafield: metafield(namespace: $variantWeightNamespace, key: $variantWeightKey) {
                   id
                   value
@@ -348,6 +420,9 @@ export async function fetchShopifyProducts(searchQuery) {
           variants = [...variants, ...extraVariants];
         }
 
+        // Only keep variants that have a "Gold" selectedOption (e.g. 14K, 18K)
+        const goldVariants = variants.filter((v) => v.isGoldVariant);
+
         return {
           id: node.id,
           title: node.title,
@@ -360,11 +435,17 @@ export async function fetchShopifyProducts(searchQuery) {
           weightMetafieldId: node.weightMetafield?.id,
           karatMetafieldId: node.karatMetafield?.id,
           diamondMetafieldId: node.diamondMetafield?.id,
-          variants,
+          variants: goldVariants,
+          _hasGoldVariants: goldVariants.length > 0,
         };
       }));
 
-      allProducts.push(...mappedProducts);
+      // Only include products that have at least one variant with a "Gold" option
+      const goldProducts = mappedProducts.filter((p) => p._hasGoldVariants);
+      // Clean up the internal flag before storing
+      goldProducts.forEach((p) => delete p._hasGoldVariants);
+
+      allProducts.push(...goldProducts);
 
       hasMoreProducts = productsPage?.pageInfo?.hasNextPage || false;
       productCursor = productsPage?.pageInfo?.endCursor || null;
@@ -409,7 +490,7 @@ export async function updateShopifyVariantPricesBulk(productId, variantsUpdates)
 
   const data = await shopifyGraphQL(mutation, variables);
   const errors = data.productVariantsBulkUpdate?.userErrors || [];
-  
+
   if (errors.length > 0) {
     throw new Error(`Shopify Variant Update Error: ${errors.map((e) => e.message).join(', ')}`);
   }
@@ -496,19 +577,19 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
   if (!variantsData || variantsData.length === 0) return true;
 
   const settings = await getSettings();
-  
+
   const variantWeightNamespace = settings.variantWeightNamespace || 'custom';
   const variantWeightKey = settings.variantWeightKey || 'gold_weight';
-  
+
   const variantKaratNamespace = settings.variantKaratNamespace || 'custom';
   const variantKaratKey = settings.variantKaratKey || 'gold_karat';
-  
+
   const diamondShapeNamespace = settings.diamondShapeNamespace || 'custom';
   const diamondShapeKey = settings.diamondShapeKey || 'diamond_shape';
-  
+
   const diamondCrtNamespace = settings.diamondCrtNamespace || 'custom';
   const diamondCrtKey = settings.diamondCrtKey || 'diamond_crt';
-  
+
   const diamondColorNamespace = settings.diamondColorNamespace || 'custom';
   const diamondColorKey = settings.diamondColorKey || 'diamond_color';
 
@@ -592,7 +673,7 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
   for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
     const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
     const variables = { metafields: chunk };
-    
+
     const response = await shopifyGraphQL(mutation, variables);
     const errors = response.metafieldsSet?.userErrors || [];
 

@@ -11,9 +11,11 @@ const maskSecret = (value, visibleLength = 4) => {
 export async function GET() {
   try {
     const settings = await getSettings();
+    // Do not send shopify tokens to frontend at all
+    const { shopifyAccessToken, shopifyDynamicToken, ...safeSettings } = settings;
+    
     const maskedSettings = {
-      ...settings,
-      shopifyAccessToken: maskSecret(settings.shopifyAccessToken, 6),
+      ...safeSettings,
       goldApiKey: maskSecret(settings.goldApiKey, 4),
     };
     return NextResponse.json(maskedSettings);
@@ -31,17 +33,17 @@ export async function POST(request) {
     const currentSettings = await getSettings();
 
     // Preserve original secrets if submitted as masked placeholders
-    if (payload.shopifyAccessToken && payload.shopifyAccessToken.includes('•')) {
-      payload.shopifyAccessToken = currentSettings.shopifyAccessToken;
-    }
     if (payload.goldApiKey && payload.goldApiKey.includes('•')) {
       payload.goldApiKey = currentSettings.goldApiKey;
     }
 
     const updated = await saveSettings(payload);
+    
+    // Do not send shopify tokens to frontend at all
+    const { shopifyAccessToken, shopifyDynamicToken, ...safeSettings } = updated;
+    
     const maskedSettings = {
-      ...updated,
-      shopifyAccessToken: maskSecret(updated.shopifyAccessToken, 6),
+      ...safeSettings,
       goldApiKey: maskSecret(updated.goldApiKey, 4),
     };
     return NextResponse.json({ success: true, settings: maskedSettings });

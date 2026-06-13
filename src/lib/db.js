@@ -49,8 +49,8 @@ const DEFAULT_SETTINGS = {
     heart: { d: 34999, ef: 31999, gh: 29999 },
     radiant: { d: 34999, ef: 31999, gh: 29999 },
     marquise: { d: 34999, ef: 31999, gh: 29999 },
-    baguette: { d: 34999, ef: 31999, gh: 29999 }
-  }
+    baguette: { d: 34999, ef: 31999, gh: 29999 },
+  },
 };
 
 async function connectToDatabase() {
@@ -64,7 +64,7 @@ async function connectToDatabase() {
     if (!global._mongoClient) {
       global._mongoClient = new MongoClient(uri);
     }
-    
+
     // Ensure connection is active
     try {
       await global._mongoClient.connect();
@@ -77,7 +77,7 @@ async function connectToDatabase() {
       await global._mongoClient.connect();
       await global._mongoClient.db('admin').command({ ping: 1 });
     }
-    
+
     return global._mongoClient.db('GoldSync');
   } catch (error) {
     console.error('Failed to connect to MongoDB, falling back to file storage:', error.message);
@@ -165,7 +165,7 @@ export async function getLogs() {
     try {
       const collection = mongoDb.collection('logs');
       const result = await collection.find({}).sort({ timestamp: -1 }).limit(100).toArray();
-      return result.map(doc => {
+      return result.map((doc) => {
         const log = { ...doc };
         delete log._id; // Clean MongoDB metadata
         return log;
@@ -211,6 +211,40 @@ export async function addLog(log) {
   const updatedLogs = [newLog, ...logs].slice(0, 100);
   await fs.writeFile(LOGS_PATH, JSON.stringify(updatedLogs, null, 2), 'utf-8');
   return newLog;
+}
+
+// Store Shopify dynamic token and its update timestamp
+export async function updateDynamicToken(token) {
+  const tokenData = {
+    shopifyDynamicToken: token,
+    shopifyTokenUpdatedAt: Date.now(),
+  };
+
+  const mongoDb = await connectToDatabase();
+  if (mongoDb) {
+    try {
+      const collection = mongoDb.collection('settings');
+      await collection.updateOne(
+        { _id: 'app_settings' },
+        { $set: tokenData },
+        { upsert: true }
+      );
+    } catch (error) {
+      console.error('Failed to save dynamic token to MongoDB:', error);
+    }
+  } else {
+    // Fallback to local file storage
+    try {
+      const current = await getSettings();
+      const persistableSettings = { ...current, ...tokenData };
+      delete persistableSettings.shopifyShop;
+      delete persistableSettings.shopifyAccessToken;
+      delete persistableSettings.goldApiKey;
+      await fs.writeFile(SETTINGS_PATH, JSON.stringify(persistableSettings, null, 2), 'utf-8');
+    } catch (error) {
+      console.error('Failed to save dynamic token to file:', error);
+    }
+  }
 }
 
 export async function getSchedulerState() {
