@@ -35,8 +35,8 @@ const DEFAULT_SETTINGS = {
   markupPercentage: 0,
   autoSyncEnabled: false,
   syncInterval: 5,
-  timezone: 'Asia/Dhaka',
-  syncTimes: ['18:00'],
+  timezone: 'Asia/Kolkata',
+  syncTimes: ['09:00', '23:30'],
   diamondPrices: {
     round: { d: 34999, ef: 31999, gh: 29999 },
     princess: { d: 34999, ef: 31999, gh: 29999 },
