@@ -318,7 +318,7 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       price: variant.price,
       sku: variant.sku || null,
       selectedOptions: variant.selectedOptions || [],
-      isGoldVariant: !!goldOption,
+      isGoldVariant: true,
       goldOptionValue: goldOption ? goldOption.value : null, // e.g. "14K", "18K"
       weightValue: variant.vWeightMetafield?.value ? parseFloat(variant.vWeightMetafield.value) : null,
       karatValue,
