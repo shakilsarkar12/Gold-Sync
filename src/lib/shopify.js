@@ -150,6 +150,11 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
   const diamondCrtKey = settings.diamondCrtKey || 'diamond_crt';
   const diamondColorNamespace = settings.diamondColorNamespace || 'custom';
   const diamondColorKey = settings.diamondColorKey || 'diamond_color';
+  // Small diamond input metafields
+  const sdGradeNamespace = settings.smallDiamondGradeNamespace || 'custom';
+  const sdGradeKey = settings.smallDiamondGradeKey || 'small_diamonds_grade';
+  const sdWeightNamespace = settings.smallDiamondWeightNamespace || 'custom';
+  const sdWeightKey = settings.smallDiamondWeightKey || 'small_diamonds_weight';
 
   let shopifyQuery = 'status:ACTIVE';
   if (searchQuery) {
@@ -177,6 +182,10 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       $diamondCrtKey: String!
       $diamondColorNamespace: String!
       $diamondColorKey: String!
+      $sdGradeNamespace: String!
+      $sdGradeKey: String!
+      $sdWeightNamespace: String!
+      $sdWeightKey: String!
     ) {
       products(first: $first, after: $after, query: $query) {
         pageInfo {
@@ -247,6 +256,16 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
                     value
                     type
                   }
+                  vSmallDiamGradeMetafield: metafield(namespace: $sdGradeNamespace, key: $sdGradeKey) {
+                    id
+                    value
+                    type
+                  }
+                  vSmallDiamWeightMetafield: metafield(namespace: $sdWeightNamespace, key: $sdWeightKey) {
+                    id
+                    value
+                    type
+                  }
                 }
               }
             }
@@ -276,6 +295,10 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
     diamondCrtKey,
     diamondColorNamespace,
     diamondColorKey,
+    sdGradeNamespace,
+    sdGradeKey,
+    sdWeightNamespace,
+    sdWeightKey,
   });
 
   // Helper to extract diamond carats and gold karat from variant title
@@ -325,6 +348,10 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       shapeValue: variant.vShapeMetafield?.value || null,
       crtValue,
       colorValue: variant.vColorMetafield?.value || null,
+      smallDiamondGrade: variant.vSmallDiamGradeMetafield?.value || null,
+      smallDiamondWeight: variant.vSmallDiamWeightMetafield?.value
+        ? parseFloat(variant.vSmallDiamWeightMetafield.value)
+        : null,
       weightMetafieldId: variant.vWeightMetafield?.id,
       karatMetafieldId: variant.vKaratMetafield?.id,
       shapeMetafieldId: variant.vShapeMetafield?.id,
@@ -349,6 +376,10 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
         $diamondCrtKey: String!
         $diamondColorNamespace: String!
         $diamondColorKey: String!
+        $sdGradeNamespace: String!
+        $sdGradeKey: String!
+        $sdWeightNamespace: String!
+        $sdWeightKey: String!
       ) {
         product(id: $productId) {
           variants(first: 100, after: $after) {
@@ -391,6 +422,16 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
                   value
                   type
                 }
+                vSmallDiamGradeMetafield: metafield(namespace: $sdGradeNamespace, key: $sdGradeKey) {
+                  id
+                  value
+                  type
+                }
+                vSmallDiamWeightMetafield: metafield(namespace: $sdWeightNamespace, key: $sdWeightKey) {
+                  id
+                  value
+                  type
+                }
               }
             }
           }
@@ -416,6 +457,10 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
         diamondCrtKey,
         diamondColorNamespace,
         diamondColorKey,
+        sdGradeNamespace,
+        sdGradeKey,
+        sdWeightNamespace,
+        sdWeightKey,
       });
 
       const variantsPage = data.product?.variants;
@@ -801,6 +846,92 @@ export async function runBulkProductVariantsUpdate(jsonlString) {
   return bulkOp.id;
 }
 
+/**
+ * Writes computed pricing breakdown values to variant-level metafields.
+ * Called during every sync so the Shopify theme can display a full price breakdown.
+ *
+ * @param {Array}  variantsData  - [{ variantId, breakdown }]
+ * @param {Object} settings      - App settings from getSettings()
+ */
+export async function updateVariantBreakdownMetafields(variantsData, settings) {
+  if (!settings.priceBreakdownEnabled) return true;
+  if (!variantsData || variantsData.length === 0) return true;
+
+  const mutation = `
+    mutation UpdateVariantBreakdown($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { id namespace key value }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  // Resolve output metafield keys from settings
+  const rateNs     = (settings.bdGoldRatePerGramNamespace  || 'custom').trim();
+  const rateKey    = (settings.bdGoldRatePerGramKey         || 'gold_rate_per_gram').trim();
+  const goldValNs  = (settings.bdTotalGoldValueNamespace    || 'custom').trim();
+  const goldValKey = (settings.bdTotalGoldValueKey           || 'total_gold_value').trim();
+  const csValNs    = (settings.bdCentreStoneValueNamespace   || 'custom').trim();
+  const csValKey   = (settings.bdCentreStoneValueKey          || 'centre_stone_value').trim();
+  const sdValNs    = (settings.bdSmallDiamondValueNamespace   || 'custom').trim();
+  const sdValKey   = (settings.bdSmallDiamondValueKey          || 'small_diamonds_value').trim();
+  const mkRateNs   = (settings.bdMakingChargeRateNamespace    || 'custom').trim();
+  const mkRateKey  = (settings.bdMakingChargeRateKey           || 'making_charge_per_gram').trim();
+  const mkTotalNs  = (settings.bdTotalMakingNamespace          || 'custom').trim();
+  const mkTotalKey = (settings.bdTotalMakingKey                 || 'total_making_charge').trim();
+
+  let allMetafields = [];
+
+  for (const { variantId, breakdown } of variantsData) {
+    // 1. Gold rate per gram (karat-adjusted)
+    if (breakdown.goldRatePerGram != null) {
+      allMetafields.push({ ownerId: variantId, namespace: rateNs, key: rateKey,
+        value: String(Number(breakdown.goldRatePerGram.toFixed(4))), type: 'number_decimal' });
+    }
+    // 2. Total gold value (weight × rate)
+    if (breakdown.totalGoldValue != null) {
+      allMetafields.push({ ownerId: variantId, namespace: goldValNs, key: goldValKey,
+        value: String(Number(breakdown.totalGoldValue.toFixed(2))), type: 'number_decimal' });
+    }
+    // 3. Centre stone value
+    if (breakdown.centreStoneValue != null) {
+      allMetafields.push({ ownerId: variantId, namespace: csValNs, key: csValKey,
+        value: String(Number(breakdown.centreStoneValue.toFixed(2))), type: 'number_decimal' });
+    }
+    // 4. Small diamonds value
+    if (breakdown.smallDiamondValue != null) {
+      allMetafields.push({ ownerId: variantId, namespace: sdValNs, key: sdValKey,
+        value: String(Number(breakdown.smallDiamondValue.toFixed(2))), type: 'number_decimal' });
+    }
+    // 5. Making charge per gram (from settings)
+    if (breakdown.makingChargeRate != null) {
+      allMetafields.push({ ownerId: variantId, namespace: mkRateNs, key: mkRateKey,
+        value: String(Number(breakdown.makingChargeRate)), type: 'number_decimal' });
+    }
+    // 6. Total making charge
+    if (breakdown.totalMakingCharge != null) {
+      allMetafields.push({ ownerId: variantId, namespace: mkTotalNs, key: mkTotalKey,
+        value: String(Number(breakdown.totalMakingCharge.toFixed(2))), type: 'number_decimal' });
+    }
+  }
+
+  if (allMetafields.length === 0) return true;
+
+  const CHUNK_SIZE = 25;
+  for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
+    const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
+    const response = await shopifyGraphQL(mutation, { metafields: chunk });
+    const errors = response.metafieldsSet?.userErrors || [];
+    if (errors.length > 0) {
+      throw new Error(`Variant Breakdown Metafields Error: ${errors.map((e) => e.message).join(', ')}`);
+    }
+    await sleep(250);
+  }
+
+  console.log(`[Breakdown MF] Updated breakdown metafields for ${variantsData.length} variants.`);
+  return true;
+}
+
 export async function getCurrentBulkOperation() {
   const query = `
     query {
@@ -819,4 +950,88 @@ export async function getCurrentBulkOperation() {
   `;
   const data = await shopifyGraphQL(query);
   return data.currentBulkOperation;
+}
+
+/**
+ * Writes live GoldAPI rate values to two configurable product-level metafields
+ * for every product that was fetched during the sync run.
+ * Only runs if the corresponding Enabled flag is set in settings.
+ *
+ * @param {Array}  products  - Products array returned by fetchShopifyProducts
+ * @param {Object} rates     - Live gold rates from fetchLiveGoldRates
+ * @param {Object} settings  - App settings from getSettings
+ */
+export async function updateProductGoldRateMetafields(products, rates, settings) {
+  const mf1Enabled = settings.goldRateMetafield1Enabled;
+  const mf2Enabled = settings.goldRateMetafield2Enabled;
+
+  if (!mf1Enabled && !mf2Enabled) return true; // nothing to do
+  if (!products || products.length === 0) return true;
+
+  const mutation = `
+    mutation UpdateProductGoldRateMetafields($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { id namespace key value }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const mf1Ns  = (settings.goldRateMetafield1Namespace || 'custom').trim();
+  const mf1Key = (settings.goldRateMetafield1Key || 'gold_rate_24k').trim();
+  const mf1Src = settings.goldRateMetafield1Source || 'price_gram_24k';
+
+  const mf2Ns  = (settings.goldRateMetafield2Namespace || 'custom').trim();
+  const mf2Key = (settings.goldRateMetafield2Key || 'gold_rate_18k').trim();
+  const mf2Src = settings.goldRateMetafield2Source || 'price_gram_18k';
+
+  const mf1Value = rates[mf1Src] != null ? String(rates[mf1Src]) : null;
+  const mf2Value = rates[mf2Src] != null ? String(rates[mf2Src]) : null;
+
+  if (mf1Enabled && !mf1Value) {
+    console.warn(`[GoldRate MF] Source "${mf1Src}" not found in rates — skipping metafield #1`);
+  }
+  if (mf2Enabled && !mf2Value) {
+    console.warn(`[GoldRate MF] Source "${mf2Src}" not found in rates — skipping metafield #2`);
+  }
+
+  let allMetafields = [];
+
+  for (const product of products) {
+    if (mf1Enabled && mf1Value) {
+      allMetafields.push({
+        ownerId: product.id,
+        namespace: mf1Ns,
+        key: mf1Key,
+        value: mf1Value,
+        type: 'number_decimal',
+      });
+    }
+    if (mf2Enabled && mf2Value) {
+      allMetafields.push({
+        ownerId: product.id,
+        namespace: mf2Ns,
+        key: mf2Key,
+        value: mf2Value,
+        type: 'number_decimal',
+      });
+    }
+  }
+
+  if (allMetafields.length === 0) return true;
+
+  // Shopify allows max 25 metafields per metafieldsSet call
+  const CHUNK_SIZE = 25;
+  for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
+    const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
+    const response = await shopifyGraphQL(mutation, { metafields: chunk });
+    const errors = response.metafieldsSet?.userErrors || [];
+    if (errors.length > 0) {
+      throw new Error(`Gold Rate Metafields Set Error: ${errors.map((e) => e.message).join(', ')}`);
+    }
+    await sleep(250);
+  }
+
+  console.log(`[GoldRate MF] Updated gold rate metafields for ${products.length} products.`);
+  return true;
 }

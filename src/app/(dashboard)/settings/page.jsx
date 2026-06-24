@@ -43,6 +43,33 @@ export default function SettingsPage() {
     syncInterval: 5,
     timezone: 'Asia/Dhaka',
     syncTimes: ['18:00'],
+    goldRateMetafield1Enabled: false,
+    goldRateMetafield1Namespace: 'custom',
+    goldRateMetafield1Key: 'gold_rate_24k',
+    goldRateMetafield1Source: 'price_gram_24k',
+    goldRateMetafield2Enabled: false,
+    goldRateMetafield2Namespace: 'custom',
+    goldRateMetafield2Key: 'gold_rate_18k',
+    goldRateMetafield2Source: 'price_gram_18k',
+    // Price Breakdown Metafields
+    priceBreakdownEnabled: false,
+    smallDiamondGradeNamespace: 'custom',
+    smallDiamondGradeKey: 'small_diamonds_grade',
+    smallDiamondWeightNamespace: 'custom',
+    smallDiamondWeightKey: 'small_diamonds_weight',
+    smallDiamondPricePerCarat: 0,
+    bdGoldRatePerGramNamespace: 'custom',
+    bdGoldRatePerGramKey: 'gold_rate_per_gram',
+    bdTotalGoldValueNamespace: 'custom',
+    bdTotalGoldValueKey: 'total_gold_value',
+    bdCentreStoneValueNamespace: 'custom',
+    bdCentreStoneValueKey: 'centre_stone_value',
+    bdSmallDiamondValueNamespace: 'custom',
+    bdSmallDiamondValueKey: 'small_diamonds_value',
+    bdMakingChargeRateNamespace: 'custom',
+    bdMakingChargeRateKey: 'making_charge_per_gram',
+    bdTotalMakingNamespace: 'custom',
+    bdTotalMakingKey: 'total_making_charge',
     diamondPrices: {
       round: { d: 34999, ef: 31999, gh: 29999 },
       princess: { d: 34999, ef: 31999, gh: 29999 },
@@ -461,6 +488,152 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {/* ── Gold Rate Product Metafields ── */}
+          <div className="glass-card" style={{ borderLeft: '4px solid rgba(212,175,55,0.55)' }}>
+            <h2 className="card-title luxury-text">
+              <span>Gold Rate Metafields (Product Level)</span>
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+              Write live GoldAPI values to two configurable <strong>product</strong> metafields on every sync — auto or manual. Your Shopify theme can then read these values to display the current gold rate.
+            </p>
+
+            {/* ── Metafield #1 ── */}
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                <input
+                  id="goldRateMetafield1Enabled"
+                  type="checkbox"
+                  name="goldRateMetafield1Enabled"
+                  style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--gold-primary)' }}
+                  checked={settings.goldRateMetafield1Enabled}
+                  onChange={handleChange}
+                />
+                <label className="form-label" htmlFor="goldRateMetafield1Enabled" style={{ marginBottom: 0, cursor: 'pointer', fontWeight: 600 }}>
+                  Enable Metafield #1
+                </label>
+              </div>
+
+              {settings.goldRateMetafield1Enabled && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>GoldAPI Value to Write</label>
+                    <select
+                      name="goldRateMetafield1Source"
+                      className="form-input form-select"
+                      value={settings.goldRateMetafield1Source}
+                      onChange={handleChange}
+                    >
+                      <option value="price">Spot Price (per troy oz)</option>
+                      <option value="price_gram_24k">Price per gram — 24K</option>
+                      <option value="price_gram_22k">Price per gram — 22K</option>
+                      <option value="price_gram_21k">Price per gram — 21K</option>
+                      <option value="price_gram_18k">Price per gram — 18K</option>
+                      <option value="price_gram_14k">Price per gram — 14K</option>
+                      <option value="price_gram_10k">Price per gram — 10K</option>
+                    </select>
+                  </div>
+                  <div className="grid-2" style={{ gap: '0.75rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.8rem' }}>Namespace</label>
+                      <input
+                        type="text"
+                        name="goldRateMetafield1Namespace"
+                        className="form-input"
+                        value={settings.goldRateMetafield1Namespace}
+                        onChange={handleChange}
+                        placeholder="custom"
+                        required={settings.goldRateMetafield1Enabled}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.8rem' }}>Key</label>
+                      <input
+                        type="text"
+                        name="goldRateMetafield1Key"
+                        className="form-input"
+                        value={settings.goldRateMetafield1Key}
+                        onChange={handleChange}
+                        placeholder="gold_rate_24k"
+                        required={settings.goldRateMetafield1Enabled}
+                      />
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+                    Written to every synced product as: <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 4px', borderRadius: 3 }}>{settings.goldRateMetafield1Namespace}.{settings.goldRateMetafield1Key}</code>
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* ── Metafield #2 ── */}
+            <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                <input
+                  id="goldRateMetafield2Enabled"
+                  type="checkbox"
+                  name="goldRateMetafield2Enabled"
+                  style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--gold-primary)' }}
+                  checked={settings.goldRateMetafield2Enabled}
+                  onChange={handleChange}
+                />
+                <label className="form-label" htmlFor="goldRateMetafield2Enabled" style={{ marginBottom: 0, cursor: 'pointer', fontWeight: 600 }}>
+                  Enable Metafield #2
+                </label>
+              </div>
+
+              {settings.goldRateMetafield2Enabled && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>GoldAPI Value to Write</label>
+                    <select
+                      name="goldRateMetafield2Source"
+                      className="form-input form-select"
+                      value={settings.goldRateMetafield2Source}
+                      onChange={handleChange}
+                    >
+                      <option value="price">Spot Price (per troy oz)</option>
+                      <option value="price_gram_24k">Price per gram — 24K</option>
+                      <option value="price_gram_22k">Price per gram — 22K</option>
+                      <option value="price_gram_21k">Price per gram — 21K</option>
+                      <option value="price_gram_18k">Price per gram — 18K</option>
+                      <option value="price_gram_14k">Price per gram — 14K</option>
+                      <option value="price_gram_10k">Price per gram — 10K</option>
+                    </select>
+                  </div>
+                  <div className="grid-2" style={{ gap: '0.75rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.8rem' }}>Namespace</label>
+                      <input
+                        type="text"
+                        name="goldRateMetafield2Namespace"
+                        className="form-input"
+                        value={settings.goldRateMetafield2Namespace}
+                        onChange={handleChange}
+                        placeholder="custom"
+                        required={settings.goldRateMetafield2Enabled}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.8rem' }}>Key</label>
+                      <input
+                        type="text"
+                        name="goldRateMetafield2Key"
+                        className="form-input"
+                        value={settings.goldRateMetafield2Key}
+                        onChange={handleChange}
+                        placeholder="gold_rate_18k"
+                        required={settings.goldRateMetafield2Enabled}
+                      />
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+                    Written to every synced product as: <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 4px', borderRadius: 3 }}>{settings.goldRateMetafield2Namespace}.{settings.goldRateMetafield2Key}</code>
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="glass-card">
             <h2 className="card-title luxury-text">
               <span>Metafield Mapping (Variant Level)</span>
@@ -598,6 +771,134 @@ export default function SettingsPage() {
         </fieldset>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+          {/* ── Price Breakdown Metafields ── */}
+          <div className="glass-card" style={{ borderLeft: '4px solid rgba(100,200,150,0.55)' }}>
+            <h2 className="card-title luxury-text">
+              <span>Price Breakdown Metafields</span>
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+              Write individual pricing components to variant metafields on every sync.
+              Your Shopify theme reads these to display a full price breakdown on the product page.
+            </p>
+
+            {/* Master toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <input
+                id="priceBreakdownEnabled"
+                type="checkbox"
+                name="priceBreakdownEnabled"
+                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: 'var(--gold-primary)' }}
+                checked={settings.priceBreakdownEnabled}
+                onChange={handleChange}
+              />
+              <label className="form-label" htmlFor="priceBreakdownEnabled" style={{ marginBottom: 0, cursor: 'pointer' }}>
+                Enable Price Breakdown Sync
+              </label>
+            </div>
+
+            {settings.priceBreakdownEnabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+
+                {/* Small diamond config */}
+                <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '1rem', border: '1px solid var(--border-color)' }}>
+                  <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--gold-primary)', marginBottom: '0.75rem' }}>
+                    💎 Small Diamonds (Melee) Settings
+                  </p>
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Price per Carat (Small Diamonds)</label>
+                    <input
+                      type="number"
+                      name="smallDiamondPricePerCarat"
+                      className="form-input"
+                      min="0"
+                      step="1"
+                      value={settings.smallDiamondPricePerCarat}
+                      onChange={handleChange}
+                      placeholder="e.g. 15000"
+                    />
+                    <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                      Flat price per carat for melee / small diamonds. Used to calculate <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0 4px', borderRadius: 3 }}>small_diamonds_value</code>.
+                    </p>
+                  </div>
+                  <div className="grid-2" style={{ gap: '0.75rem', marginBottom: '0.5rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.75rem' }}>Small Diamond Grade — Namespace</label>
+                      <input type="text" name="smallDiamondGradeNamespace" className="form-input" value={settings.smallDiamondGradeNamespace} onChange={handleChange} placeholder="custom" />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.75rem' }}>Small Diamond Grade — Key</label>
+                      <input type="text" name="smallDiamondGradeKey" className="form-input" value={settings.smallDiamondGradeKey} onChange={handleChange} placeholder="small_diamonds_grade" />
+                    </div>
+                  </div>
+                  <div className="grid-2" style={{ gap: '0.75rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.75rem' }}>Small Diamond Weight — Namespace</label>
+                      <input type="text" name="smallDiamondWeightNamespace" className="form-input" value={settings.smallDiamondWeightNamespace} onChange={handleChange} placeholder="custom" />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.75rem' }}>Small Diamond Weight — Key</label>
+                      <input type="text" name="smallDiamondWeightKey" className="form-input" value={settings.smallDiamondWeightKey} onChange={handleChange} placeholder="small_diamonds_weight" />
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                    ℹ️ These are <strong>input</strong> metafields — set them manually in Shopify admin. Sync reads them to compute small diamond value.
+                  </p>
+                </div>
+
+                {/* Output metafield mappings table */}
+                <div>
+                  <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    📤 Output Metafield Mappings (written by sync)
+                  </p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <th style={{ textAlign: 'left', padding: '0.4rem 0', color: 'var(--text-secondary)', fontWeight: 500 }}>Metafield</th>
+                        <th style={{ textAlign: 'left', padding: '0.4rem 0.5rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Namespace</th>
+                        <th style={{ textAlign: 'left', padding: '0.4rem 0', color: 'var(--text-secondary)', fontWeight: 500 }}>Key</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { label: '⚙ Gold Rate / Gram',      ns: 'bdGoldRatePerGramNamespace', k: 'bdGoldRatePerGramKey' },
+                        { label: '⚙ Total Gold Value',       ns: 'bdTotalGoldValueNamespace',  k: 'bdTotalGoldValueKey' },
+                        { label: '💎 Centre Stone Value',    ns: 'bdCentreStoneValueNamespace', k: 'bdCentreStoneValueKey' },
+                        { label: '💎 Small Diamonds Value',  ns: 'bdSmallDiamondValueNamespace',k: 'bdSmallDiamondValueKey' },
+                        { label: '🔨 Making Charge / Gram', ns: 'bdMakingChargeRateNamespace',  k: 'bdMakingChargeRateKey' },
+                        { label: '🔨 Total Making Charge',  ns: 'bdTotalMakingNamespace',       k: 'bdTotalMakingKey' },
+                      ].map(({ label, ns, k }) => (
+                        <tr key={k} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding: '0.4rem 0', color: 'var(--text-secondary)', whiteSpace: 'nowrap', paddingRight: '0.5rem' }}>{label}</td>
+                          <td style={{ padding: '0.3rem 0.5rem' }}>
+                            <input
+                              type="text"
+                              name={ns}
+                              className="form-input"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                              value={settings[ns]}
+                              onChange={handleChange}
+                            />
+                          </td>
+                          <td style={{ padding: '0.3rem 0' }}>
+                            <input
+                              type="text"
+                              name={k}
+                              className="form-input"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                              value={settings[k]}
+                              onChange={handleChange}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="glass-card">
             <h2 className="card-title luxury-text">
               <span>Gold Pricing Formula & Tax</span>

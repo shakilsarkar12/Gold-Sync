@@ -53,6 +53,49 @@ export async function GET(request) {
 
     const isScheduledTime = syncTimes.includes(formattedTime);
 
+    // ── Check for pending bulk operation if syncing ──
+    const { getSyncStatus, setSyncStatus, addLog } = await import('@/lib/db');
+    const syncStatus = await getSyncStatus();
+    let bulkCheckMsg = null;
+
+    if (syncStatus.syncing && syncStatus.bulkOperationId) {
+      const { getCurrentBulkOperation } = await import('@/lib/shopify');
+      try {
+        const bulkOp = await getCurrentBulkOperation();
+        if (bulkOp && bulkOp.id === syncStatus.bulkOperationId) {
+          if (bulkOp.status === 'COMPLETED' || bulkOp.status === 'FAILED' || bulkOp.status === 'CANCELED') {
+            const success = bulkOp.status === 'COMPLETED';
+            const successCount = success ? syncStatus.totalItems : 0;
+            const failCount = success ? 0 : syncStatus.totalItems;
+            
+            await setSyncStatus({
+              syncing: false,
+              bulkOperationId: null,
+              completedAt: new Date().toISOString(),
+              lastResult: {
+                success,
+                successCount,
+                failCount,
+                isAuto: syncStatus.isAuto || false,
+              },
+            });
+            
+            await addLog({
+              status: success ? 'success' : 'failed',
+              type: 'bulk',
+              details: `Bulk Operation ${success ? 'completed successfully' : 'failed'} for ${syncStatus.totalItems || 'many'} variants.`,
+              productsUpdated: successCount,
+            });
+            console.log(`[Cron] Bulk Operation ${bulkOp.id} finished with status: ${bulkOp.status}`);
+            bulkCheckMsg = `Bulk Operation finished: ${bulkOp.status}`;
+          }
+        }
+      } catch (error) {
+        console.error('[Cron] Error polling bulk operation:', error);
+      }
+    }
+
+
     if (isScheduledTime) {
       const state = await getSchedulerState();
       const lastSyncTime = state.lastSyncTime || 0;
@@ -75,6 +118,7 @@ export async function GET(request) {
 
     return NextResponse.json({
       message: 'Sync not scheduled for this minute.',
+      bulkCheck: bulkCheckMsg,
       currentTime: formattedTime,
       configuredTimes: syncTimes,
       timezone

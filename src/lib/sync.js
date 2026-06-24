@@ -1,6 +1,7 @@
 import { getSettings, addLog, setSyncStatus } from './db';
 import { fetchLiveGoldRates } from './goldapi';
-import { fetchShopifyProducts, updateShopifyVariantPricesBulk, updateShopifyVariantMetafieldsBulk } from './shopify';
+import { fetchShopifyProducts, updateShopifyVariantPricesBulk, updateShopifyVariantMetafieldsBulk, updateProductGoldRateMetafields, updateVariantBreakdownMetafields } from './shopify';
+
 
 // Helper to calculate pricing based on weight, karat, diamond price, rates, and settings
 export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, rates, settings, variantTitle) {
@@ -145,6 +146,7 @@ export async function runProductSync(isAuto = false) {
   
   // 3. Find out-of-sync items
   const outOfSyncItems = [];
+  const allGoldBreakdowns = []; // for breakdown metafields — collected for ALL gold variants
   
   for (const product of products) {
     const hasGoldVariant = product.variants.some(v => v.weightValue !== null && v.weightValue > 0);
@@ -158,7 +160,7 @@ export async function runProductSync(isAuto = false) {
       const isGold = vWeight !== null && vWeight > 0;
       if (!isGold) continue;
 
-      const { finalPrice } = calculateVariantPrice({
+      const { finalPrice, breakdown } = calculateVariantPrice({
         weight: vWeight,
         karatStr: vKarat,
         diamondPrice: product.diamondPrice,
@@ -168,6 +170,26 @@ export async function runProductSync(isAuto = false) {
         rates,
         settings,
         variantTitle: variant.title
+      });
+
+      // Compute small diamond value
+      const sdWeight = variant.smallDiamondWeight;
+      const sdPricePerCarat = parseFloat(settings.smallDiamondPricePerCarat) || 0;
+      const smallDiamondValue = (sdWeight != null && sdWeight > 0 && sdPricePerCarat > 0)
+        ? Number((sdWeight * sdPricePerCarat).toFixed(2))
+        : 0;
+
+      // Collect breakdown for ALL gold variants (written regardless of price diff)
+      allGoldBreakdowns.push({
+        variantId: variant.id,
+        breakdown: {
+          goldRatePerGram:    breakdown.goldPricePerGram,
+          totalGoldValue:     breakdown.baseGoldCost,
+          centreStoneValue:   breakdown.diamondPrice,
+          smallDiamondValue,
+          makingChargeRate:   parseFloat(settings.makingChargePerGram) || 0,
+          totalMakingCharge:  breakdown.makingCharges,
+        },
       });
       
       const diff = Math.abs(parseFloat(variant.price) - finalPrice);
@@ -192,6 +214,16 @@ export async function runProductSync(isAuto = false) {
     }
   }
   
+  // ── Write Metafields Unconditionally ──
+  // We write these even if prices haven't changed, and we must write them before returning
+  // early in any path (like 0 changes or >= 250 bulk changes).
+  await updateProductGoldRateMetafields(products, rates, settings).catch((err) => {
+    console.warn('[Sync] Gold rate metafield update skipped:', err.message);
+  });
+  await updateVariantBreakdownMetafields(allGoldBreakdowns, settings).catch((err) => {
+    console.warn('[Sync] Breakdown metafield update skipped:', err.message);
+  });
+
   if (outOfSyncItems.length === 0) {
     // Mark sync as complete with 0 count
     await setSyncStatus({
