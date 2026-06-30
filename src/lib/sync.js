@@ -263,6 +263,32 @@ export async function runProductSync(isAuto = false) {
 
   const productIds = Object.keys(groupedByProduct);
 
+  // Update variant metafields for all out-of-sync items before updating prices
+  const allMetafieldsData = [];
+  for (const item of outOfSyncItems) {
+    if (item.metafields) {
+      const mf = item.metafields;
+      const hasAnyMetafield = mf.weight !== null || mf.karat !== null ||
+        mf.shape !== null || mf.crt !== null || mf.color !== null;
+      if (hasAnyMetafield) {
+        allMetafieldsData.push({
+          variantId: item.variantId,
+          weight: mf.weight !== null ? mf.weight : null,
+          karat: mf.karat || null,
+          shape: mf.shape || null,
+          crt: mf.crt !== null ? mf.crt : null,
+          color: mf.color || null,
+        });
+      }
+    }
+  }
+  
+  if (allMetafieldsData.length > 0) {
+    await updateShopifyVariantMetafieldsBulk(allMetafieldsData).catch(err => {
+      console.warn('[Sync] Variant metafields update failed:', err.message);
+    });
+  }
+
   if (outOfSyncItems.length >= 250) {
     try {
       let jsonlString = '';
@@ -297,30 +323,6 @@ export async function runProductSync(isAuto = false) {
     const items = groupedByProduct[pid];
     
     try {
-      // Prepare bulk metafields
-      const metafieldsData = [];
-      for (const item of items) {
-        if (item.metafields) {
-          const mf = item.metafields;
-          const hasAnyMetafield = mf.weight !== null || mf.karat !== null ||
-            mf.shape !== null || mf.crt !== null || mf.color !== null;
-          if (hasAnyMetafield) {
-            metafieldsData.push({
-              variantId: item.variantId,
-              weight: mf.weight !== null ? mf.weight : null,
-              karat: mf.karat || null,
-              shape: mf.shape || null,
-              crt: mf.crt !== null ? mf.crt : null,
-              color: mf.color || null,
-            });
-          }
-        }
-      }
-      
-      if (metafieldsData.length > 0) {
-         await updateShopifyVariantMetafieldsBulk(metafieldsData);
-      }
-      
       const priceUpdates = items.map(item => ({
         id: item.variantId,
         price: item.newPrice.toString()

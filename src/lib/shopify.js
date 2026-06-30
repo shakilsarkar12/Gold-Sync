@@ -82,6 +82,7 @@ async function shopifyGraphQL(query, variables = {}, retries = 3) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query, variables }),
+      cache: 'no-store',
     });
 
     if (!response.ok) {
@@ -705,7 +706,7 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
         namespace: variantWeightNamespace,
         key: variantWeightKey,
         value: weight.toString(),
-        type: 'single_line_text_field',
+        type: 'number_decimal',
       });
     }
 
@@ -735,7 +736,7 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
         namespace: diamondCrtNamespace,
         key: diamondCrtKey,
         value: crt.toString(),
-        type: 'single_line_text_field',
+        type: 'number_decimal',
       });
     }
 
@@ -1004,7 +1005,6 @@ export async function updateProductGoldRateMetafields(products, rates, settings)
         namespace: mf1Ns,
         key: mf1Key,
         value: mf1Value,
-        type: 'number_decimal',
       });
     }
     if (mf2Enabled && mf2Value) {
@@ -1013,7 +1013,6 @@ export async function updateProductGoldRateMetafields(products, rates, settings)
         namespace: mf2Ns,
         key: mf2Key,
         value: mf2Value,
-        type: 'number_decimal',
       });
     }
   }

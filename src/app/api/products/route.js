@@ -6,6 +6,7 @@ import {
   updateShopifyVariantPricesBulk,
   updateShopifyProductMetafields,
   updateShopifyVariantMetafieldsBulk,
+  updateProductGoldRateMetafields,
 } from '@/lib/shopify';
 import { calculateVariantPrice, runProductSync } from '@/lib/sync';
 import { initScheduler } from '@/lib/scheduler';
@@ -182,6 +183,11 @@ export async function POST(request) {
       // 2. Update the variant price in Shopify
       await updateShopifyVariantPricesBulk(productId, [{ id: variantId, price: newPrice.toString() }]);
       
+      // 3. Update the global Gold Rate Metafields (14K, 18K etc.)
+      const settings = await getSettings();
+      const rates = await fetchLiveGoldRates();
+      await updateProductGoldRateMetafields([{ id: productId }], rates, settings).catch(console.error);
+
       await addLog({
         status: 'success',
         type: 'single',
@@ -245,7 +251,6 @@ export async function POST(request) {
           failCount++;
           errors.push(`${item.productTitle} (${item.variantTitle}): ${err.message}`);
         }
-        
         if ((i + 1) % 5 === 0 || i === items.length - 1) {
           await setSyncStatus({
             syncing: true,
@@ -254,6 +259,17 @@ export async function POST(request) {
             completedItems: i + 1,
           });
         }
+      }
+
+      // 3. Update the global Gold Rate Metafields (14K, 18K etc.) for all unique products synced
+      try {
+        const uniqueProductIds = [...new Set(items.map(item => item.productId))];
+        const dummyProducts = uniqueProductIds.map(id => ({ id }));
+        const settings = await getSettings();
+        const rates = await fetchLiveGoldRates();
+        await updateProductGoldRateMetafields(dummyProducts, rates, settings);
+      } catch (err) {
+        console.error('[Bulk Sync] Failed to update product gold rate metafields:', err);
       }
 
       if (successCount > 0) {

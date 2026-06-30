@@ -27,15 +27,18 @@ export default function ProductsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 100;
   
+  const [selectedVariants, setSelectedVariants] = useState(new Set());
+  
   // State for product-level edits: { [productId]: { weight, karat, diamondPrice } }
   const [editedMetafields, setEditedMetafields] = useState({});
   // State for variant-level edits: { [variantId]: { weight, karat, shape, crt, color } }
   const [editedVariantMetafields, setEditedVariantMetafields] = useState({});
   const [savingVariantMetafieldsId, setSavingVariantMetafieldsId] = useState(null);
 
-  const fetchProducts = useCallback(async () => {
+  const fetchProducts = useCallback(async (bypassCache = false) => {
     try {
-      const res = await fetch('/api/products');
+      const url = bypassCache ? '/api/products?refresh=true' : '/api/products';
+      const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to fetch products');
       const data = await res.json();
       
@@ -121,8 +124,8 @@ export default function ProductsPage() {
         throw new Error(data.error || 'Failed to update product metafields');
       }
 
-      showToast('Product metafields updated successfully', 'success');
-      await fetchProducts();
+      showToast('Variant metafields updated successfully', 'success');
+      await fetchProducts(true);
     } catch (error) {
       showToast(error.message || 'Error updating product metafields', 'error');
     } finally {
@@ -156,7 +159,7 @@ export default function ProductsPage() {
       }
 
       showToast(`Variant metafields for ${variant.title} updated successfully`, 'success');
-      await fetchProducts();
+      await fetchProducts(true);
     } catch (error) {
       showToast(error.message || 'Error updating variant metafields', 'error');
     } finally {
@@ -196,7 +199,7 @@ export default function ProductsPage() {
       }
 
       showToast(`Synced price + metafields for ${variant.title}`, 'success');
-      await fetchProducts();
+      await fetchProducts(true);
     } catch (error) {
       showToast(error.message || 'Error syncing price', 'error');
     } finally {
@@ -249,12 +252,90 @@ export default function ProductsPage() {
       if (!res.ok) throw new Error(data.error || 'Failed bulk sync');
 
       showToast(`Bulk sync complete. Updated ${data.successCount} variant prices + metafields.`, 'success');
-      await fetchProducts();
+      await fetchProducts(true);
     } catch (error) {
       showToast(error.message || 'Error executing bulk sync', 'error');
     } finally {
       setSyncingAll(false);
     }
+  };
+
+  const handleSyncSelected = async () => {
+    if (selectedVariants.size === 0) return;
+    
+    const itemsToSync = [];
+    products.forEach((p) => {
+      p.variants.forEach((v) => {
+        if (selectedVariants.has(v.id)) {
+          const vEdits = editedVariantMetafields[v.id] || {};
+          itemsToSync.push({
+            productId: p.id,
+            productTitle: p.title,
+            variantId: v.id,
+            variantTitle: v.title,
+            newPrice: v.calculatedPrice !== null ? v.calculatedPrice : v.price,
+            oldPrice: v.price,
+            metafields: {
+              weight: vEdits.weight || '',
+              karat: vEdits.karat || '',
+              shape: vEdits.shape || '',
+              crt: vEdits.crt || '',
+              color: vEdits.color || '',
+            },
+          });
+        }
+      });
+    });
+
+    setSyncingAll(true);
+    try {
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sync_bulk',
+          items: itemsToSync,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed bulk sync');
+
+      if (data.success) {
+        showToast(`Successfully synced ${data.successCount} variants`, 'success');
+      } else {
+        showToast(`Sync completed with ${data.failCount} errors`, 'warning');
+      }
+      await fetchProducts(true);
+    } catch (error) {
+      showToast(error.message || 'Error executing sync', 'error');
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
+  const toggleVariantSelection = (variantId) => {
+    setSelectedVariants(prev => {
+      const next = new Set(prev);
+      if (next.has(variantId)) next.delete(variantId);
+      else next.add(variantId);
+      return next;
+    });
+  };
+
+  const toggleProductSelection = (product) => {
+    setSelectedVariants(prev => {
+      const next = new Set(prev);
+      const allGoldVariants = product.variants.filter(v => v.isGoldVariant);
+      const allSelected = allGoldVariants.length > 0 && allGoldVariants.every(v => next.has(v.id));
+      
+      if (allSelected) {
+        allGoldVariants.forEach(v => next.delete(v.id));
+      } else {
+        allGoldVariants.forEach(v => next.add(v.id));
+      }
+      return next;
+    });
   };
 
   // Filter and search logic
@@ -281,6 +362,27 @@ export default function ProductsPage() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, filterType]);
+
+  // Calculate selection state
+  const syncableVariants = [];
+  filteredProducts.forEach(p => {
+    p.variants.forEach(v => {
+      if (v.isGoldVariant) syncableVariants.push(v);
+    });
+  });
+  const isAllSelected = syncableVariants.length > 0 && syncableVariants.every(v => selectedVariants.has(v.id));
+
+  const handleSelectAll = () => {
+    setSelectedVariants(prev => {
+      const next = new Set(prev);
+      if (isAllSelected) {
+        syncableVariants.forEach(v => next.delete(v.id));
+      } else {
+        syncableVariants.forEach(v => next.add(v.id));
+      }
+      return next;
+    });
+  };
 
   // Flatten products and variants into a single list of rows for exact pagination
   const allRows = [];
@@ -322,16 +424,29 @@ export default function ProductsPage() {
           <h1 className="page-title luxury-text">Catalog Management</h1>
           <p className="page-subtitle">Update gold weights and diamond prices at product level, and sync variant prices</p>
         </div>
-        {outOfSyncVariantsCount > 0 && (
-          <button
-            onClick={handleSyncAll}
-            className="btn btn-primary"
-            disabled={syncingAll}
-          >
-            <RefreshCw className={syncingAll ? 'animate-spin' : ''} size={16} />
-            <span>{syncingAll ? 'Syncing...' : `Sync ${outOfSyncVariantsCount} Out-of-Sync Prices`}</span>
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          {selectedVariants.size > 0 && (
+            <button
+              onClick={handleSyncSelected}
+              className="btn btn-secondary"
+              disabled={syncingAll}
+              style={{ borderColor: 'var(--gold-primary)', color: 'var(--gold-primary)' }}
+            >
+              <RefreshCw className={syncingAll ? 'animate-spin' : ''} size={16} />
+              <span>{syncingAll ? 'Syncing...' : `Sync Selected (${selectedVariants.size})`}</span>
+            </button>
+          )}
+          {outOfSyncVariantsCount > 0 && (
+            <button
+              onClick={handleSyncAll}
+              className="btn btn-primary"
+              disabled={syncingAll}
+            >
+              <RefreshCw className={syncingAll ? 'animate-spin' : ''} size={16} />
+              <span>{syncingAll ? 'Syncing...' : `Sync ${outOfSyncVariantsCount} Out-of-Sync`}</span>
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Filters and Search */}
@@ -368,6 +483,9 @@ export default function ProductsPage() {
           <table className="custom-table">
             <thead>
               <tr>
+                <th style={{ width: '40px', textAlign: 'center' }}>
+                  <input type="checkbox" checked={isAllSelected} onChange={handleSelectAll} style={{ cursor: 'pointer' }} />
+                </th>
                 <th style={{ width: '220px' }}>Product & Variant Title</th>
                 <th>Gold Weight (g)</th>
                 <th>Karat</th>
@@ -390,8 +508,13 @@ export default function ProductsPage() {
                     edits.karat !== (product.karatValue || '') ||
                     parseFloat(edits.diamondPrice || 0) !== (product.diamondPrice || 0);
 
+                  const isProductSelected = product.variants.filter(v => v.isGoldVariant).length > 0 && product.variants.filter(v => v.isGoldVariant).every(v => selectedVariants.has(v.id));
+
                   return (
                     <tr key={`prod-${product.id}`} style={{ background: 'rgba(255, 255, 255, 0.04)', borderBottom: '1px solid var(--border-color)' }}>
+                      <td style={{ textAlign: 'center' }}>
+                        <input type="checkbox" checked={isProductSelected} onChange={() => toggleProductSelection(product)} style={{ cursor: 'pointer' }} />
+                      </td>
                       {/* Product Title */}
                       <td style={{ padding: '0.75rem 1.25rem' }}>
                         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -514,8 +637,18 @@ export default function ProductsPage() {
 
                   return (
                     <tr key={`var-${variant.id}`} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
+                      <td style={{ textAlign: 'center' }}>
+                        {variant.isGoldVariant && (
+                          <input 
+                            type="checkbox" 
+                            checked={selectedVariants.has(variant.id)} 
+                            onChange={() => toggleVariantSelection(variant.id)} 
+                            style={{ cursor: 'pointer' }} 
+                          />
+                        )}
+                      </td>
                       {/* Column 1: Variant Title / SKU */}
-                      <td style={{ paddingLeft: '2.5rem' }}>
+                      <td style={{ paddingLeft: '1.5rem' }}>
                         <div style={{ fontSize: '0.7rem', color: 'var(--gold-primary)', marginBottom: '0.15rem', opacity: 0.8 }}>
                           {product.title}
                         </div>
