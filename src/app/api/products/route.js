@@ -12,6 +12,9 @@ import { calculateVariantPrice, runProductSync } from '@/lib/sync';
 import { initScheduler } from '@/lib/scheduler';
 import { setSyncStatus } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(request) {
   try {
     initScheduler(); // Initialize background auto-sync scheduler if not already running
@@ -24,18 +27,18 @@ export async function GET(request) {
       });
     }
 
+    const url = new URL(request.url);
+    const bypassCache = url.searchParams.get('refresh') === 'true';
+
     let rates;
     try {
-      rates = await fetchLiveGoldRates();
+      rates = await fetchLiveGoldRates(bypassCache);
     } catch (e) {
       return NextResponse.json(
         { error: `GoldAPI Error: ${e.message}. Please verify your API Key in Settings.` },
         { status: 500 }
       );
     }
-
-    const url = new URL(request.url);
-    const bypassCache = url.searchParams.get('refresh') === 'true';
 
     const products = await fetchShopifyProducts(null, bypassCache);
     

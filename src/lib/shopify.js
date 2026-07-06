@@ -1005,6 +1005,7 @@ export async function updateProductGoldRateMetafields(products, rates, settings)
         namespace: mf1Ns,
         key: mf1Key,
         value: mf1Value,
+        type: 'number_decimal',
       });
     }
     if (mf2Enabled && mf2Value) {
@@ -1013,6 +1014,7 @@ export async function updateProductGoldRateMetafields(products, rates, settings)
         namespace: mf2Ns,
         key: mf2Key,
         value: mf2Value,
+        type: 'number_decimal',
       });
     }
   }

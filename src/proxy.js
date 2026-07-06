@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 
 // Define public paths that don't require authentication
-const publicPaths = ['/login', '/api/auth/login', '/api/cron-sync'];
+const publicPaths = ['/login', '/api/auth/login', '/api/cron-sync', '/api/gold-rates'];
 
 export default async function proxy(request) {
   const { pathname } = request.nextUrl;

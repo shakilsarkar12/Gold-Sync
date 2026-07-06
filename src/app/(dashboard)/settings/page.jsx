@@ -15,7 +15,6 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState({
     shopifyShop: '',
     shopifyAccessToken: '',
-    goldApiKey: '',
     currency: 'USD',
     defaultKarat: '18K',
     weightNamespace: 'custom',
@@ -343,26 +342,8 @@ export default function SettingsPage() {
 
           <div className="glass-card">
             <h2 className="card-title luxury-text">
-              <span>GoldAPI.io Settings</span>
+              <span>Base Pricing Settings</span>
             </h2>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="goldApiKey">
-                GoldAPI.io Key
-              </label>
-              <input
-                id="goldApiKey"
-                type="password"
-                name="goldApiKey"
-                className="form-input"
-                placeholder="goldapi-xxxxxx-xxxxxx"
-                value={settings.goldApiKey}
-                onChange={handleChange}
-                disabled={true}
-                required
-              />
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Managed securely in .env configuration</p>
-            </div>
 
             <div className="grid-2" style={{ marginBottom: 0, gap: '1rem' }}>
               <div className="form-group">

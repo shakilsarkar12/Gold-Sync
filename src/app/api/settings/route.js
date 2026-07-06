@@ -12,13 +12,9 @@ export async function GET() {
   try {
     const settings = await getSettings();
     // Do not send shopify tokens to frontend at all
-    const { shopifyAccessToken, shopifyDynamicToken, ...safeSettings } = settings;
+    const { shopifyAccessToken, shopifyDynamicToken, goldApiKey, ...safeSettings } = settings;
     
-    const maskedSettings = {
-      ...safeSettings,
-      goldApiKey: maskSecret(settings.goldApiKey, 4),
-    };
-    return NextResponse.json(maskedSettings);
+    return NextResponse.json(safeSettings);
   } catch (error) {
     return NextResponse.json(
       { error: error.message || 'Failed to fetch settings' },
@@ -30,23 +26,16 @@ export async function GET() {
 export async function POST(request) {
   try {
     const payload = await request.json();
-    const currentSettings = await getSettings();
+    
+    // Remove sensitive keys from payload before saving if necessary
+    const { shopifyAccessToken, shopifyDynamicToken, goldApiKey, ...settingsToSave } = payload;
 
-    // Preserve original secrets if submitted as masked placeholders
-    if (payload.goldApiKey && payload.goldApiKey.includes('•')) {
-      payload.goldApiKey = currentSettings.goldApiKey;
-    }
-
-    const updated = await saveSettings(payload);
+    const updated = await saveSettings(settingsToSave);
     
     // Do not send shopify tokens to frontend at all
-    const { shopifyAccessToken, shopifyDynamicToken, ...safeSettings } = updated;
+    const { shopifyAccessToken: _t1, shopifyDynamicToken: _t2, goldApiKey: _t3, ...safeSettings } = updated;
     
-    const maskedSettings = {
-      ...safeSettings,
-      goldApiKey: maskSecret(updated.goldApiKey, 4),
-    };
-    return NextResponse.json({ success: true, settings: maskedSettings });
+    return NextResponse.json({ success: true, settings: safeSettings });
   } catch (error) {
     return NextResponse.json(
       { error: error.message || 'Failed to save settings' },

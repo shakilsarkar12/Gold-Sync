@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { MongoClient } from 'mongodb';
+import mysql from 'mysql2/promise';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
@@ -9,7 +9,6 @@ const LOGS_PATH = path.join(DATA_DIR, 'logs.json');
 const DEFAULT_SETTINGS = {
   shopifyShop: (process.env.SHOPIFY_SHOP_DOMAIN || '').trim(),
   shopifyAccessToken: (process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim(),
-  goldApiKey: (process.env.GOLD_API_KEY || '').trim(),
   currency: 'INR',
   defaultKarat: '18K',
   weightNamespace: 'custom',
@@ -28,7 +27,6 @@ const DEFAULT_SETTINGS = {
   diamondCrtKey: 'diamond_crt',
   diamondColorNamespace: 'custom',
   diamondColorKey: 'diamond_color',
-  // Product metafields to write GoldAPI values during sync
   goldRateMetafield1Enabled: false,
   goldRateMetafield1Namespace: 'custom',
   goldRateMetafield1Key: 'gold_rate_24k',
@@ -37,15 +35,12 @@ const DEFAULT_SETTINGS = {
   goldRateMetafield2Namespace: 'custom',
   goldRateMetafield2Key: 'gold_rate_18k',
   goldRateMetafield2Source: 'price_gram_18k',
-  // ── Price Breakdown Metafields (variant level) ──
   priceBreakdownEnabled: false,
-  // Small diamond inputs — read from Shopify (user sets these manually in admin)
   smallDiamondGradeNamespace: 'custom',
   smallDiamondGradeKey: 'small_diamonds_grade',
   smallDiamondWeightNamespace: 'custom',
   smallDiamondWeightKey: 'small_diamonds_weight',
-  smallDiamondPricePerCarat: 0,       // flat price per carat for melee/small stones
-  // Breakdown output metafields (written by sync)
+  smallDiamondPricePerCarat: 0,
   bdGoldRatePerGramNamespace: 'custom',
   bdGoldRatePerGramKey: 'gold_rate_per_gram',
   bdTotalGoldValueNamespace: 'custom',
@@ -83,36 +78,101 @@ const DEFAULT_SETTINGS = {
   },
 };
 
-async function connectToDatabase() {
-  const uri = process.env.DB_URI;
-  if (!uri) {
-    // If DB_URI is not configured, return null to fallback to local files
+let mysqlPool = null;
+let dbInitialized = false;
+
+async function getMysqlPool() {
+  const host = process.env.MYSQL_HOST;
+  const user = process.env.MYSQL_USER;
+  const password = process.env.MYSQL_PASSWORD;
+  const database = process.env.MYSQL_DATABASE;
+
+  if (!host || !user || !database) {
     return null;
   }
 
-  try {
-    if (!global._mongoClient) {
-      global._mongoClient = new MongoClient(uri);
-    }
-
-    // Ensure connection is active
+  if (!mysqlPool) {
     try {
-      await global._mongoClient.connect();
-      // Test the connection
-      await global._mongoClient.db('admin').command({ ping: 1 });
-    } catch (e) {
-      // Reconnect if topology is closed or other errors
-      console.warn('MongoDB connection issue, reconnecting...', e.message);
-      global._mongoClient = new MongoClient(uri);
-      await global._mongoClient.connect();
-      await global._mongoClient.db('admin').command({ ping: 1 });
-    }
+      mysqlPool = mysql.createPool({
+        host,
+        user,
+        password,
+        database,
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0,
+      });
 
-    return global._mongoClient.db('GoldSync');
+      // Test connection
+      await mysqlPool.query('SELECT 1');
+    } catch (error) {
+      console.error('Failed to connect to MySQL:', error.message);
+      mysqlPool = null;
+      return null;
+    }
+  }
+
+  if (mysqlPool && !dbInitialized) {
+    try {
+      await mysqlPool.query(`
+        CREATE TABLE IF NOT EXISTS gold_sync_store (
+          collection VARCHAR(50) NOT NULL,
+          doc_id VARCHAR(100) NOT NULL,
+          data JSON NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (collection, doc_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+      dbInitialized = true;
+    } catch (err) {
+      console.error('Failed to initialize MySQL table:', err.message);
+    }
+  }
+
+  return mysqlPool;
+}
+
+// Helper for NoSQL-like operations in MySQL
+async function getDoc(collection, doc_id) {
+  const pool = await getMysqlPool();
+  if (!pool) return null;
+  try {
+    const [rows] = await pool.query(
+      'SELECT data FROM gold_sync_store WHERE collection = ? AND doc_id = ?',
+      [collection, doc_id]
+    );
+    if (rows.length > 0) {
+      let data = rows[0].data;
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+        } catch (e) {
+          // ignore
+        }
+      }
+      return data;
+    }
   } catch (error) {
-    console.error('Failed to connect to MongoDB, falling back to file storage:', error.message);
-    global._mongoClient = null; // Clear the broken client so we don't reuse it
-    return null;
+    console.error(`MySQL getDoc error (${collection}/${doc_id}):`, error.message);
+  }
+  return null;
+}
+
+async function setDoc(collection, doc_id, data) {
+  const pool = await getMysqlPool();
+  if (!pool) return false;
+  try {
+    await pool.query(
+      `INSERT INTO gold_sync_store (collection, doc_id, data) 
+       VALUES (?, ?, ?) 
+       ON DUPLICATE KEY UPDATE data = VALUES(data)`,
+      [collection, doc_id, JSON.stringify(data)]
+    );
+    return true;
+  } catch (error) {
+    console.error(`MySQL setDoc error (${collection}/${doc_id}):`, error.message);
+    return false;
   }
 }
 
@@ -125,20 +185,12 @@ async function ensureDirectory() {
 }
 
 export async function getSettings() {
-  const mongoDb = await connectToDatabase();
   let saved = {};
-
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('settings');
-      const doc = await collection.findOne({ _id: 'app_settings' });
-      if (doc) {
-        saved = doc;
-        delete saved._id; // Clean MongoDB metadata
-      }
-    } catch (error) {
-      console.error('Failed to get settings from MongoDB:', error);
-    }
+  const pool = await getMysqlPool();
+  
+  if (pool) {
+    const doc = await getDoc('settings', 'app_settings');
+    if (doc) saved = doc;
   } else {
     await ensureDirectory();
     try {
@@ -154,29 +206,17 @@ export async function getSettings() {
     ...saved,
     shopifyShop: (process.env.SHOPIFY_SHOP_DOMAIN || '').trim(),
     shopifyAccessToken: (process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim(),
-    goldApiKey: (process.env.GOLD_API_KEY || '').trim(),
   };
 }
 
 export async function saveSettings(newSettings) {
-  // Clone and delete credentials to prevent them from being written to settings.json or MongoDB settings
   const persistableSettings = { ...newSettings };
   delete persistableSettings.shopifyShop;
   delete persistableSettings.shopifyAccessToken;
-  delete persistableSettings.goldApiKey;
 
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('settings');
-      await collection.updateOne(
-        { _id: 'app_settings' },
-        { $set: persistableSettings },
-        { upsert: true }
-      );
-    } catch (error) {
-      console.error('Failed to save settings to MongoDB:', error);
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    await setDoc('settings', 'app_settings', persistableSettings);
   } else {
     await ensureDirectory();
     await fs.writeFile(SETTINGS_PATH, JSON.stringify(persistableSettings, null, 2), 'utf-8');
@@ -190,18 +230,22 @@ export async function saveSettings(newSettings) {
 }
 
 export async function getLogs() {
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
+  const pool = await getMysqlPool();
+  if (pool) {
     try {
-      const collection = mongoDb.collection('logs');
-      const result = await collection.find({}).sort({ timestamp: -1 }).limit(100).toArray();
-      return result.map((doc) => {
-        const log = { ...doc };
-        delete log._id; // Clean MongoDB metadata
-        return log;
+      const [rows] = await pool.query(
+        'SELECT data FROM gold_sync_store WHERE collection = ? ORDER BY updated_at DESC LIMIT 100',
+        ['logs']
+      );
+      return rows.map(row => {
+        let d = row.data;
+        if (typeof d === 'string') {
+          try { d = JSON.parse(d); } catch (e) {}
+        }
+        return d;
       });
     } catch (error) {
-      console.error('Failed to get logs from MongoDB:', error);
+      console.error('MySQL getLogs error:', error.message);
       return [];
     }
   }
@@ -223,17 +267,10 @@ export async function addLog(log) {
     timestamp: new Date().toISOString(),
   };
 
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('logs');
-      await collection.insertOne(newLog);
-      const returnLog = { ...newLog };
-      delete returnLog._id;
-      return returnLog;
-    } catch (error) {
-      console.error('Failed to add log to MongoDB:', error);
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    await setDoc('logs', newLog.id, newLog);
+    return newLog;
   }
 
   await ensureDirectory();
@@ -243,33 +280,22 @@ export async function addLog(log) {
   return newLog;
 }
 
-// Store Shopify dynamic token and its update timestamp
 export async function updateDynamicToken(token) {
   const tokenData = {
     shopifyDynamicToken: token,
     shopifyTokenUpdatedAt: Date.now(),
   };
 
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('settings');
-      await collection.updateOne(
-        { _id: 'app_settings' },
-        { $set: tokenData },
-        { upsert: true }
-      );
-    } catch (error) {
-      console.error('Failed to save dynamic token to MongoDB:', error);
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    const current = await getDoc('settings', 'app_settings') || {};
+    await setDoc('settings', 'app_settings', { ...current, ...tokenData });
   } else {
-    // Fallback to local file storage
     try {
       const current = await getSettings();
       const persistableSettings = { ...current, ...tokenData };
       delete persistableSettings.shopifyShop;
       delete persistableSettings.shopifyAccessToken;
-      delete persistableSettings.goldApiKey;
       await fs.writeFile(SETTINGS_PATH, JSON.stringify(persistableSettings, null, 2), 'utf-8');
     } catch (error) {
       console.error('Failed to save dynamic token to file:', error);
@@ -278,20 +304,11 @@ export async function updateDynamicToken(token) {
 }
 
 export async function getSchedulerState() {
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('scheduler_state');
-      const doc = await collection.findOne({ _id: 'state' });
-      if (doc) {
-        delete doc._id;
-        return doc;
-      }
-      return { lastSyncTime: 0 };
-    } catch (error) {
-      console.error('Failed to get scheduler state from MongoDB:', error);
-      return { lastSyncTime: 0 };
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    const doc = await getDoc('scheduler_state', 'state');
+    if (doc) return doc;
+    return { lastSyncTime: 0 };
   }
 
   const schedulerStatePath = path.join(DATA_DIR, 'scheduler_state.json');
@@ -304,19 +321,10 @@ export async function getSchedulerState() {
 }
 
 export async function saveSchedulerState(state) {
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('scheduler_state');
-      await collection.updateOne(
-        { _id: 'state' },
-        { $set: state },
-        { upsert: true }
-      );
-      return state;
-    } catch (error) {
-      console.error('Failed to save scheduler state to MongoDB:', error);
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    await setDoc('scheduler_state', 'state', state);
+    return state;
   }
 
   const schedulerStatePath = path.join(DATA_DIR, 'scheduler_state.json');
@@ -326,63 +334,31 @@ export async function saveSchedulerState(state) {
 }
 
 export async function getSyncStatus() {
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('sync_status');
-      const doc = await collection.findOne({ _id: 'status' });
-      if (doc) {
-        const result = { ...doc };
-        delete result._id;
-        return result;
-      }
-      return { syncing: false, lastResult: null };
-    } catch (error) {
-      console.error('Failed to get sync status from MongoDB:', error);
-      return { syncing: false, lastResult: null };
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    const doc = await getDoc('sync_status', 'status');
+    if (doc) return doc;
+    return { syncing: false, lastResult: null };
   }
-  // Fallback: use a module-level variable for local dev
   return global.__syncStatus || { syncing: false, lastResult: null };
 }
 
 export async function setSyncStatus(status) {
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('sync_status');
-      await collection.updateOne(
-        { _id: 'status' },
-        { $set: status },
-        { upsert: true }
-      );
-      return status;
-    } catch (error) {
-      console.error('Failed to set sync status in MongoDB:', error);
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    await setDoc('sync_status', 'status', status);
+    return status;
   }
-// Fallback for local dev without DB
   global.__syncStatus = { ...global.__syncStatus, ...status };
   return status;
 }
 
 export async function getProductsCache() {
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('products_cache');
-      const doc = await collection.findOne({ _id: 'cache' });
-      if (doc) {
-        return { products: doc.products, timestamp: doc.timestamp };
-      }
-      return null;
-    } catch (error) {
-      console.error('Failed to get products cache from MongoDB:', error);
-      return null;
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    return await getDoc('products_cache', 'cache');
   }
 
-  // Fallback
   const cachePath = path.join(DATA_DIR, 'products_cache.json');
   try {
     const data = await fs.readFile(cachePath, 'utf-8');
@@ -398,23 +374,11 @@ export async function setProductsCache(products) {
     timestamp: Date.now(),
   };
 
-  const mongoDb = await connectToDatabase();
-  if (mongoDb) {
-    try {
-      const collection = mongoDb.collection('products_cache');
-      await collection.updateOne(
-        { _id: 'cache' },
-        { $set: cacheData },
-        { upsert: true }
-      );
-      return true;
-    } catch (error) {
-      console.error('Failed to save products cache to MongoDB:', error);
-      return false;
-    }
+  const pool = await getMysqlPool();
+  if (pool) {
+    return await setDoc('products_cache', 'cache', cacheData);
   }
 
-  // Fallback
   const cachePath = path.join(DATA_DIR, 'products_cache.json');
   await ensureDirectory();
   try {
