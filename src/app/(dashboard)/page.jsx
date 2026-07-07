@@ -186,7 +186,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              Configure GoldAPI key in Settings to load live rates.
+              Loading live rates from IBJA...
             </div>
           )}
         </div>

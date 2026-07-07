@@ -139,7 +139,8 @@ export async function runProductSync(isAuto = false) {
     totalItems: 0,
     completedItems: 0
   });
-  const rates = await fetchLiveGoldRates(true);
+  // If Auto Sync, force fetch (true). If Manual Sync, check cache duration (false, true).
+  const rates = await fetchLiveGoldRates(isAuto, !isAuto);
   
   // 2. Fetch all products from Shopify (bypass cache)
   const products = await fetchShopifyProducts(null, true);

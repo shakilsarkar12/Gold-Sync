@@ -389,3 +389,35 @@ export async function setProductsCache(products) {
     return false;
   }
 }
+
+export async function getSavedGoldRates() {
+  const pool = await getMysqlPool();
+  if (pool) {
+    return await getDoc('gold_rates', 'rates');
+  }
+
+  const cachePath = path.join(DATA_DIR, 'gold_rates.json');
+  try {
+    const data = await fs.readFile(cachePath, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveGoldRates(rates) {
+  const pool = await getMysqlPool();
+  if (pool) {
+    return await setDoc('gold_rates', 'rates', rates);
+  }
+
+  const cachePath = path.join(DATA_DIR, 'gold_rates.json');
+  await ensureDirectory();
+  try {
+    await fs.writeFile(cachePath, JSON.stringify(rates), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to write local gold_rates.json:', error);
+    return false;
+  }
+}

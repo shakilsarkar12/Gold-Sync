@@ -13,13 +13,22 @@ export async function getGramRatesFromIbja() {
 
         const $ = cheerio.load(data);
 
-        const raw999 = $('#lblGold999_AM').text().trim();
-        const raw750 = $('#lblGold750_AM').text().trim();
-        const raw585 = $('#lblGold585_AM').text().trim();
+        const getFirstValidRate = (label) => {
+            let rate = NaN;
+            $(`td[data-label="${label}"]`).each((_, el) => {
+                const text = $(el).text().trim();
+                const parsed = parseFloat(text.replace(/,/g, ''));
+                if (!isNaN(parsed) && parsed > 0) {
+                    rate = parsed;
+                    return false; // Break loop
+                }
+            });
+            return rate;
+        };
 
-        const price999_10g = parseFloat(raw999.replace(/,/g, ''));
-        const price750_10g = parseFloat(raw750.replace(/,/g, ''));
-        const price585_10g = parseFloat(raw585.replace(/,/g, ''));
+        const price999_10g = getFirstValidRate("Gold 999");
+        const price750_10g = getFirstValidRate("Gold 750");
+        const price585_10g = getFirstValidRate("Gold 585");
 
         if (isNaN(price999_10g) || isNaN(price750_10g) || isNaN(price585_10g)) {
             throw new Error('Could not scrape rates from IBJA site.');

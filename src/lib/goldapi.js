@@ -1,21 +1,25 @@
-import { getSettings } from './db';
+import { getSettings, getSavedGoldRates, saveGoldRates } from './db';
 import { getGramRatesFromIbja } from './ibja';
 
-let ratesCache = null;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-export async function fetchLiveGoldRates(forceRefresh = false) {
+export async function fetchLiveGoldRates(forceRefresh = false, checkCacheDuration = false) {
   const settings = await getSettings();
   const currency = settings.currency || 'INR';
 
+  const savedCache = await getSavedGoldRates();
   const now = Date.now();
-  if (
-    !forceRefresh &&
-    ratesCache &&
-    ratesCache.currency === currency &&
-    now - ratesCache.timestamp < CACHE_TTL
-  ) {
-    return ratesCache.data;
+
+  // Just return the DB rates immediately if they exist and we are not forcing a refresh
+  if (!forceRefresh && !checkCacheDuration && savedCache && savedCache.data) {
+    return savedCache.data;
+  }
+
+  // Return DB rates if within 5 mins for checkCacheDuration mode
+  if (!forceRefresh && checkCacheDuration && savedCache && savedCache.data) {
+    if (now - savedCache.timestamp < CACHE_TTL) {
+      return savedCache.data;
+    }
   }
 
   try {
@@ -30,7 +34,7 @@ export async function fetchLiveGoldRates(forceRefresh = false) {
     const spotPrice = priceGram24k * troyOunceToGrams;
 
     const rates = {
-      timestamp: Math.floor(Date.now() / 1000),
+      timestamp: Math.floor(now / 1000),
       metal: 'XAU',
       currency: 'INR',
       price: Number(spotPrice.toFixed(4)),
@@ -42,19 +46,21 @@ export async function fetchLiveGoldRates(forceRefresh = false) {
       price_gram_10k: Number((priceGram24k * 10 / 24).toFixed(4)),
     };
 
-    ratesCache = {
+    const newCache = {
       data: rates,
       timestamp: now,
       currency: 'INR',
     };
+    
+    await saveGoldRates(newCache);
 
     return rates;
   } catch (error) {
     console.error('Failed to fetch from IBJA:', error);
     
-    if (ratesCache) {
-      console.warn('Returning expired cache due to scraper error');
-      return ratesCache.data;
+    if (savedCache && savedCache.data) {
+      console.warn('Returning expired cache from DB due to scraper error');
+      return savedCache.data;
     }
 
     throw error;
