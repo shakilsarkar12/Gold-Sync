@@ -39,11 +39,9 @@ export async function fetchLiveGoldRates(forceRefresh = false, checkCacheDuratio
       currency: 'INR',
       price: Number(spotPrice.toFixed(4)),
       price_gram_24k: gramRates["24K"],
-      price_gram_22k: Number((priceGram24k * 22 / 24).toFixed(4)),
-      price_gram_21k: Number((priceGram24k * 21 / 24).toFixed(4)),
-      price_gram_18k: gramRates["18K"],
-      price_gram_14k: gramRates["14K"],
-      price_gram_10k: Number((priceGram24k * 10 / 24).toFixed(4)),
+      price_gram_22k: gramRates["22K"] || Number((priceGram24k * 22 / 24).toFixed(4)),
+      price_gram_18k: gramRates["18K"] || Number((priceGram24k * 18 / 24).toFixed(4)),
+      price_gram_14k: gramRates["14K"] || Number((priceGram24k * 14 / 24).toFixed(4)),
     };
 
     const newCache = {

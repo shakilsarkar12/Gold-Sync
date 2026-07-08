@@ -45,8 +45,8 @@ export default function Dashboard() {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  const handleRefreshRates = () => {
-    loadDashboardData(true);
+  const handleRefreshRates = async () => {
+    await loadDashboardData(true);
     showToast('Rates refreshed successfully', 'success');
   };
 
@@ -168,20 +168,12 @@ export default function Dashboard() {
                 <div className="rate-value">{rates.currency} {Number(rates.price_gram_22k).toFixed(2)}</div>
               </div>
               <div className="rate-item">
-                <div className="rate-karat">21K</div>
-                <div className="rate-value">{rates.currency} {Number(rates.price_gram_21k).toFixed(2)}</div>
-              </div>
-              <div className="rate-item">
                 <div className="rate-karat">18K</div>
                 <div className="rate-value">{rates.currency} {Number(rates.price_gram_18k).toFixed(2)}</div>
               </div>
               <div className="rate-item">
                 <div className="rate-karat">14K</div>
                 <div className="rate-value">{rates.currency} {Number(rates.price_gram_14k).toFixed(2)}</div>
-              </div>
-              <div className="rate-item">
-                <div className="rate-karat">10K</div>
-                <div className="rate-value">{rates.currency} {Number(rates.price_gram_10k).toFixed(2)}</div>
               </div>
             </div>
           ) : (

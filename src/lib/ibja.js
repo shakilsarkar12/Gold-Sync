@@ -13,31 +13,20 @@ export async function getGramRatesFromIbja() {
 
         const $ = cheerio.load(data);
 
-        const getFirstValidRate = (label) => {
-            let rate = NaN;
-            $(`td[data-label="${label}"]`).each((_, el) => {
-                const text = $(el).text().trim();
-                const parsed = parseFloat(text.replace(/,/g, ''));
-                if (!isNaN(parsed) && parsed > 0) {
-                    rate = parsed;
-                    return false; // Break loop
-                }
-            });
-            return rate;
-        };
+        const price999 = parseFloat($('#GoldRatesCompare999').text().replace(/,/g, ''));
+        const price916 = parseFloat($('#GoldRatesCompare916').text().replace(/,/g, ''));
+        const price750 = parseFloat($('#GoldRatesCompare750').text().replace(/,/g, ''));
+        const price585 = parseFloat($('#GoldRatesCompare585').text().replace(/,/g, ''));
 
-        const price999_10g = getFirstValidRate("Gold 999");
-        const price750_10g = getFirstValidRate("Gold 750");
-        const price585_10g = getFirstValidRate("Gold 585");
-
-        if (isNaN(price999_10g) || isNaN(price750_10g) || isNaN(price585_10g)) {
-            throw new Error('Could not scrape rates from IBJA site.');
+        if (isNaN(price999) || isNaN(price916) || isNaN(price750) || isNaN(price585)) {
+            throw new Error('Could not scrape rates from IBJA site widgets.');
         }
 
         const ratesPerGram = {
-            "24K": parseFloat((price999_10g / 10).toFixed(2)),
-            "18K": parseFloat((price750_10g / 10).toFixed(2)),
-            "14K": parseFloat((price585_10g / 10).toFixed(2))
+            "24K": price999,
+            "22K": price916,
+            "18K": price750,
+            "14K": price585
         };
 
         return ratesPerGram;
