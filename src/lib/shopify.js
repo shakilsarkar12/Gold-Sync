@@ -1036,3 +1036,56 @@ export async function updateProductGoldRateMetafields(products, rates, settings)
   console.log(`[GoldRate MF] Updated gold rate metafields for ${products.length} products.`);
   return true;
 }
+
+/**
+ * Writes the making charge per gram value to a product-level metafield
+ * for every product. This is called when the making charge setting is updated.
+ *
+ * @param {Array}  products  - Products array returned by fetchShopifyProducts
+ * @param {number} makingCharge - The making charge per gram value
+ */
+export async function updateProductMakingChargeMetafields(products, makingCharge) {
+  if (!products || products.length === 0) return true;
+
+  const mutation = `
+    mutation UpdateProductMakingChargeMetafields($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { id namespace key value }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const namespace = 'custom';
+  const key = 'making_rate_per_gram';
+  const value = String(makingCharge || 0);
+
+  let allMetafields = [];
+
+  for (const product of products) {
+    allMetafields.push({
+      ownerId: product.id,
+      namespace: namespace,
+      key: key,
+      value: value,
+      type: 'number_decimal',
+    });
+  }
+
+  if (allMetafields.length === 0) return true;
+
+  // Shopify allows max 25 metafields per metafieldsSet call
+  const CHUNK_SIZE = 25;
+  for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
+    const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
+    const response = await shopifyGraphQL(mutation, { metafields: chunk });
+    const errors = response.metafieldsSet?.userErrors || [];
+    if (errors.length > 0) {
+      throw new Error(`Making Charge Metafields Set Error: ${errors.map((e) => e.message).join(', ')}`);
+    }
+    await sleep(250);
+  }
+
+  console.log(`[MakingCharge MF] Updated making charge metafields for ${products.length} products.`);
+  return true;
+}

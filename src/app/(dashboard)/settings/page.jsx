@@ -261,14 +261,14 @@ export default function SettingsPage() {
         throw new Error(errData.error || 'Failed to save settings');
       }
 
+      const data = await res.json();
+
       // Update the saved snapshot so button becomes disabled again
       setSavedSettings(settings);
-      showToast('Settings saved successfully', 'success');
+      showToast(data.message || 'Settings saved successfully', 'success');
 
-      // Only trigger auto-sync if pricing or diamond matrix fields changed
-      if (hasPricingChanges) {
-        fetch('/api/sync-now', { method: 'POST' }).catch(() => {});
-      }
+      // Removed: Do not automatically trigger price sync when settings change.
+      // Price sync should only be triggered manually from the products page or via scheduled auto-sync.
     } catch (error) {
       showToast(error.message || 'Error updating settings', 'error');
     } finally {
