@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Gem, History, Settings, Coins, LogOut } from 'lucide-react';
+import { LayoutDashboard, Gem, History, Settings, Coins, LogOut, Database } from 'lucide-react';
 import { useToast } from '@/components/Toast';
 
 export default function Sidebar() {
@@ -14,6 +14,7 @@ export default function Sidebar() {
     { href: '/', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/products', label: 'Products', icon: Gem },
     { href: '/history', label: 'Sync History', icon: History },
+    { href: '/metafields', label: 'Metafields', icon: Database },
     { href: '/settings', label: 'Settings', icon: Settings },
   ];
 
