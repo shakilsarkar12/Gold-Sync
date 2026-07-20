@@ -15,7 +15,7 @@
     "jose": "^6.2.3",
     "lucide-react": "^1.17.0",
     "mysql2": "^3.22.5",
-    "next": "16.2.6",
+    "next": "^16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -24,7 +24,11 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "^16.2.10",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "^8.5.10",
+    "js-yaml": "^4.2.0"
   }
 }

@@ -286,7 +286,7 @@ export default function MetafieldsPage() {
                   className="form-input"
                   value={type}
                   onChange={(e) => setType(e.target.value)}
-                  style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                  style={{ backgroundColor: 'var(--bg-dark)', color: 'var(--text-primary)' }}
                 >
                   <option value="single_line_text_field">Single line text</option>
                   <option value="number_decimal">Number (decimal)</option>
@@ -367,7 +367,7 @@ export default function MetafieldsPage() {
                     value={selectedCollectionId}
                     onChange={(e) => setSelectedCollectionId(e.target.value)}
                     style={{
-                      backgroundColor: 'var(--bg-secondary)',
+                      backgroundColor: 'var(--bg-dark)',
                       color: 'var(--text-primary)',
                       paddingRight: '2rem',
                       appearance: 'none',
@@ -610,7 +610,7 @@ export default function MetafieldsPage() {
                   style={{
                     position: 'sticky',
                     top: 0,
-                    backgroundColor: 'var(--bg-secondary)',
+                    backgroundColor: 'var(--bg-dark)',
                     zIndex: 1,
                   }}
                 >
@@ -666,7 +666,7 @@ export default function MetafieldsPage() {
                                   width: '30px',
                                   height: '30px',
                                   borderRadius: '4px',
-                                  backgroundColor: 'var(--bg-secondary)',
+                                  backgroundColor: 'var(--bg-dark)',
                                   border: '1px solid var(--border-color)',
                                 }}
                               />
