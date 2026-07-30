@@ -1,44 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getSettings } from '@/lib/db';
+import { shopifyGraphQL } from '@/lib/shopify';
 
 export const dynamic = 'force-dynamic';
-
-async function shopifyGraphQL(query, variables = {}) {
-  const settings = await getSettings();
-  const shop = settings.shopifyShop;
-  const token = settings.shopifyDynamicToken || settings.shopifyAccessToken;
-
-  if (!shop || !token) {
-    throw new Error('Shopify Store URL or token is not configured.');
-  }
-
-  let cleanShop = shop.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  if (!cleanShop.includes('.myshopify.com')) {
-    cleanShop = `${cleanShop}.myshopify.com`;
-  }
-  const url = `https://${cleanShop}/admin/api/2024-04/graphql.json`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'X-Shopify-Access-Token': token,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query, variables }),
-    cache: 'no-store',
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Shopify API error: ${response.status} - ${text}`);
-  }
-
-  const result = await response.json();
-  if (result.errors) {
-    throw new Error(`Shopify GraphQL error: ${result.errors.map(e => e.message).join(', ')}`);
-  }
-  return result.data;
-}
 
 // GET /api/collections?mode=products  → lightweight list of ALL active products
 // GET /api/collections                → list of all Shopify collections

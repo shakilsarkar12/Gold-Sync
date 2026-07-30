@@ -1,38 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSettings } from '@/lib/db';
-// Need to import a GraphQL executor. I will create a helper here since shopifyGraphQL is not exported.
-
-async function executeShopifyGraphQL(query, variables = {}) {
-  const settings = await getSettings();
-  const shop = settings.shopifyShop;
-  let token = settings.shopifyDynamicToken || settings.shopifyAccessToken;
-
-  let cleanShop = shop.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  if (!cleanShop.includes('.myshopify.com')) {
-    cleanShop = `${cleanShop}.myshopify.com`;
-  }
-  const url = `https://${cleanShop}/admin/api/2024-04/graphql.json`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'X-Shopify-Access-Token': token,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Shopify API error: ${response.status} - ${text}`);
-  }
-
-  const result = await response.json();
-  if (result.errors) {
-    throw new Error(`Shopify GraphQL error: ${result.errors.map(e => e.message).join(', ')}`);
-  }
-  return result.data;
-}
+import { shopifyGraphQL } from '@/lib/shopify';
 
 export async function POST(request) {
   try {
@@ -83,7 +51,7 @@ export async function POST(request) {
       const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
       const variables = { metafields: chunk };
 
-      const response = await executeShopifyGraphQL(mutation, variables);
+      const response = await shopifyGraphQL(mutation, variables);
       
       const userErrors = response.metafieldsSet?.userErrors || [];
       if (userErrors.length > 0) {
