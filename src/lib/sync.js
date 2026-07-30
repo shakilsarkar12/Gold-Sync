@@ -48,10 +48,15 @@ export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, ra
     goldPricePerGram = priceGram24k * (karatNum / 24);
   }
 
-  const baseGoldCost = (parseFloat(weight) || 0) * goldPricePerGram;
+  const parsedWeight = parseFloat(weight);
+  const effectiveWeight = (!isNaN(parsedWeight) && parsedWeight > 0) 
+    ? parsedWeight 
+    : (parseFloat(appSettings?.defaultWeight) || 3.5);
+
+  const baseGoldCost = effectiveWeight * goldPricePerGram;
   
   // Making charges: (weight * perGram) + fixed
-  const makingCharges = ((parseFloat(weight) || 0) * (parseFloat(appSettings.makingChargePerGram) || 0)) + (parseFloat(appSettings.makingChargeFixed) || 0);
+  const makingCharges = (effectiveWeight * (parseFloat(appSettings.makingChargePerGram) || 0)) + (parseFloat(appSettings.makingChargeFixed) || 0);
   
   // Calculate gemstone price dynamically if Gemstone Quality (color) and carats (crt) are provided
   let calculatedDiamondPrice = 0;
@@ -159,16 +164,14 @@ export async function runProductSync(isAuto = false) {
     const allGoldBreakdowns = []; // for breakdown metafields — collected for ALL gold variants
     
     for (const product of products) {
-      const hasGoldVariant = product.variants.some(v => v.weightValue !== null && v.weightValue > 0);
-      const isProductGold = product.weightValue !== null && product.weightValue > 0;
-      if (!isProductGold && !hasGoldVariant) continue;
+      if (!product.variants || product.variants.length === 0) continue;
       
       for (const variant of product.variants) {
-        const vWeight = variant.weightValue !== null ? variant.weightValue : product.weightValue;
+        const rawWeight = variant.weightValue !== null ? variant.weightValue : product.weightValue;
+        const vWeight = (rawWeight !== null && !isNaN(parseFloat(rawWeight)) && parseFloat(rawWeight) > 0) 
+          ? parseFloat(rawWeight) 
+          : (parseFloat(settings.defaultWeight) || 3.5);
         const vKarat = variant.karatValue !== null ? variant.karatValue : product.karatValue;
-        
-        const isGold = vWeight !== null && vWeight > 0;
-        if (!isGold) continue;
 
         const { finalPrice, compareAtPrice, breakdown } = calculateVariantPrice({
           weight: vWeight,

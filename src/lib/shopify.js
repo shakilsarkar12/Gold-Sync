@@ -303,14 +303,27 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
     sdWeightKey,
   });
 
-  // Helper to extract diamond carats and gold karat from variant title
-  // Title format examples: "Yellow gold / 1.5ct / 18K", "White gold / 1ct / 14kt", "2ct / 18k"
+  // Helper to extract diamond carats (including multi-stone addition like "1.5ct + 1.5ct") and gold karat
+  function parseCaratString(str) {
+    if (!str) return null;
+    // Handle multi-stone addition (e.g. "1.5ct + 1.5ct", "1ct + 1ct")
+    if (str.includes('+')) {
+      const matches = str.match(/\d+(?:\.\d+)?/g);
+      if (matches && matches.length > 0) {
+        const total = matches.reduce((sum, val) => sum + parseFloat(val), 0);
+        return total > 0 ? Number(total.toFixed(2)) : null;
+      }
+    }
+    // Standard carat match — requires "ct", "crt", or "carat"
+    const match = str.match(/(\d+(?:\.\d+)?)\s*(?:c[tr]|carat)/i);
+    return match ? parseFloat(match[1]) : null;
+  }
+
   function parseVariantTitle(title) {
     if (!title) return { titleCrt: null, titleKarat: null };
 
-    // Extract diamond carats — match patterns like "1ct", "1.5ct", "2 ct" (case insensitive)
-    const crtMatch = title.match(/(\d+(?:\.\d+)?)\s*ct/i);
-    const titleCrt = crtMatch ? parseFloat(crtMatch[1]) : null;
+    // Extract diamond carats — match patterns like "1.5ct + 1.5ct", "1ct", "1.5ct", "2 ct"
+    const titleCrt = parseCaratString(title);
 
     // Extract gold karat — match patterns like "18K", "14K", "22K", "18kt", "14kt" (case insensitive)
     const karatMatch = title.match(/\b(\d{2})\s*k(?:t|arat)?\b/i);
@@ -320,13 +333,32 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
   }
 
   // Helper to map a raw variant node to our shape
-  function mapVariant(variant) {
+  function mapVariant(variant, productTags = []) {
     const { titleCrt, titleKarat } = parseVariantTitle(variant.title);
 
-    // Metafield values take priority; fall back to title-parsed values
+    // Check selectedOptions for Centre stone / Carat / ct / crt
+    const crtOption = (variant.selectedOptions || []).find((o) => {
+      const name = (o.name || '').toLowerCase();
+      const val = (o.value || '').toLowerCase();
+      return name.includes('centre stone') || name.includes('center stone') || name.includes('carat') || name.includes('crt') || name === 'ct' || val.includes('ct');
+    });
+
+    let optionCrtValue = null;
+    if (crtOption && crtOption.value) {
+      optionCrtValue = parseCaratString(crtOption.value);
+      // Fallback if option name is explicitly "Centre stone" or "Carat" and value is just a number like "1.5"
+      if (optionCrtValue === null) {
+        const fallbackMatch = crtOption.value.match(/(\d+(?:\.\d+)?)/);
+        if (fallbackMatch) {
+          optionCrtValue = parseFloat(fallbackMatch[1]);
+        }
+      }
+    }
+
+    // Metafield values take priority; fall back to selectedOptions -> title-parsed values
     const crtValue = variant.vCrtMetafield?.value
       ? parseFloat(variant.vCrtMetafield.value)
-      : titleCrt;
+      : (optionCrtValue !== null ? optionCrtValue : titleCrt);
 
     // Check selectedOptions for gold karat option (e.g., Gold, Karat)
     const karatOption = (variant.selectedOptions || []).find((o) => {
@@ -357,11 +389,42 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       const name = (o.name || '').toLowerCase();
       return name.includes('shape');
     });
-    const shapeValue = shapeOption ? shapeOption.value : (variant.vShapeMetafield?.value || null);
+
+    // Check product tags for gemstone shape
+    let tagShape = null;
+    if (Array.isArray(productTags) && productTags.length > 0) {
+      const shapeMap = {
+        round: 'Round',
+        princess: 'Princess',
+        cushion: 'Cushion',
+        oval: 'Oval',
+        emerald: 'Emerald',
+        portuguese: 'Portuguese',
+        pear: 'Pear',
+        asscher: 'Asscher',
+        heart: 'Heart',
+        radiant: 'Radiant',
+        marquise: 'Marquise',
+        baguette: 'Baguette'
+      };
+      for (const tag of productTags) {
+        const cleanTag = (tag || '').trim().toLowerCase();
+        if (shapeMap[cleanTag]) {
+          tagShape = shapeMap[cleanTag];
+          break;
+        }
+      }
+    }
+
+    const shapeValue = shapeOption 
+      ? shapeOption.value 
+      : (variant.vShapeMetafield?.value || tagShape || null);
 
     const goldOption = (variant.selectedOptions || []).find(
-      (o) => o.name.toLowerCase() === 'gold'
+      (o) => o.name.toLowerCase() === 'gold' || o.name.toLowerCase().includes('karat')
     );
+
+    const rawWeight = variant.vWeightMetafield?.value ? parseFloat(variant.vWeightMetafield.value) : null;
 
     return {
       id: variant.id,
@@ -372,7 +435,7 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       selectedOptions: variant.selectedOptions || [],
       isGoldVariant: true,
       goldOptionValue: goldOption ? goldOption.value : null, // e.g. "14K", "18K"
-      weightValue: variant.vWeightMetafield?.value ? parseFloat(variant.vWeightMetafield.value) : null,
+      weightValue: (rawWeight !== null && !isNaN(rawWeight) && rawWeight > 0) ? rawWeight : null,
       karatValue,
       shapeValue,
       crtValue,
@@ -390,7 +453,7 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
   }
 
   // Helper to paginate ALL variants for a single product using cursor
-  async function fetchRemainingVariants(productId, afterCursor) {
+  async function fetchRemainingVariants(productId, afterCursor, productTags = []) {
     const variantPageQuery = `
       query GetProductVariants(
         $productId: ID!
@@ -495,7 +558,7 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
 
       const variantsPage = data.product?.variants;
       const edges = variantsPage?.edges || [];
-      allVariants.push(...edges.map(({ node }) => mapVariant(node)));
+      allVariants.push(...edges.map(({ node }) => mapVariant(node, productTags)));
 
       hasMore = variantsPage?.pageInfo?.hasNextPage || false;
       cursor = variantsPage?.pageInfo?.endCursor || null;
@@ -523,11 +586,11 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
         const diamondPrice = node.diamondMetafield?.value ? parseFloat(node.diamondMetafield.value) : 0;
 
         const variantsPage = node.variants;
-        let variants = (variantsPage?.edges || []).map(({ node: variant }) => mapVariant(variant));
+        let variants = (variantsPage?.edges || []).map(({ node: variant }) => mapVariant(variant, node.tags || []));
 
         // If there are more variant pages, fetch them all
         if (variantsPage?.pageInfo?.hasNextPage) {
-          const extraVariants = await fetchRemainingVariants(node.id, variantsPage.pageInfo.endCursor);
+          const extraVariants = await fetchRemainingVariants(node.id, variantsPage.pageInfo.endCursor, node.tags || []);
           variants = [...variants, ...extraVariants];
         }
 
@@ -763,12 +826,29 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
       });
     }
 
-    if (shape !== null && shape !== undefined) {
+    if (shape !== null && shape !== undefined && shape.trim() !== '') {
+      const cleanShape = shape.trim().toLowerCase();
+      const shapeMap = {
+        round: 'Round',
+        princess: 'Princess',
+        cushion: 'Cushion',
+        oval: 'Oval',
+        emerald: 'Emerald',
+        portuguese: 'Portuguese',
+        pear: 'Pear',
+        asscher: 'Asscher',
+        heart: 'Heart',
+        radiant: 'Radiant',
+        marquise: 'Marquise',
+        baguette: 'Baguette'
+      };
+      const formattedShape = shapeMap[cleanShape] || (shape.trim().charAt(0).toUpperCase() + shape.trim().slice(1));
+
       allMetafields.push({
         ownerId: variantId,
         namespace: diamondShapeNamespace,
         key: diamondShapeKey,
-        value: shape.trim(),
+        value: formattedShape,
         type: 'single_line_text_field',
       });
     }
@@ -1112,7 +1192,7 @@ export async function updateProductGoldRateMetafields(products, rates, settings)
  * @param {Array}  products  - Products array returned by fetchShopifyProducts
  * @param {number} makingCharge - The making charge per gram value
  */
-export async function updateProductMakingChargeMetafields(products, makingCharge) {
+export async function updateProductMakingChargeMetafields(products, makingCharge, onProgress) {
   if (!products || products.length === 0) return true;
 
   const mutation = `
@@ -1144,6 +1224,8 @@ export async function updateProductMakingChargeMetafields(products, makingCharge
 
   // Shopify allows max 25 metafields per metafieldsSet call
   const CHUNK_SIZE = 25;
+  let processed = 0;
+
   for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
     const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
     const response = await shopifyGraphQL(mutation, { metafields: chunk });
@@ -1151,7 +1233,15 @@ export async function updateProductMakingChargeMetafields(products, makingCharge
     if (errors.length > 0) {
       throw new Error(`Making Charge Metafields Set Error: ${errors.map((e) => e.message).join(', ')}`);
     }
-    await sleep(250);
+    processed += chunk.length;
+    if (typeof onProgress === 'function') {
+      try {
+        await onProgress(processed, allMetafields.length);
+      } catch (e) {
+        // Ignore progress logging errors
+      }
+    }
+    await sleep(200);
   }
 
   console.log(`[MakingCharge MF] Updated making charge metafields for ${products.length} products.`);

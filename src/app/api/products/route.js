@@ -48,18 +48,11 @@ export async function GET(request) {
       let isAnyVariantGold = false;
 
       const enrichedVariants = product.variants.map((variant) => {
-        const vWeight = variant.weightValue !== null ? variant.weightValue : product.weightValue;
+        const rawWeight = variant.weightValue !== null ? variant.weightValue : product.weightValue;
+        const vWeight = (rawWeight !== null && !isNaN(parseFloat(rawWeight)) && parseFloat(rawWeight) > 0)
+          ? parseFloat(rawWeight)
+          : (parseFloat(settings.defaultWeight) || 3.5);
         const vKarat = variant.karatValue !== null ? variant.karatValue : product.karatValue;
-
-        const isGold = vWeight !== null && vWeight > 0;
-        if (!isGold) {
-          return {
-            ...variant,
-            isGoldVariant: false,
-            calculatedPrice: null,
-            outOfSync: false,
-          };
-        }
 
         isAnyVariantGold = true;
 

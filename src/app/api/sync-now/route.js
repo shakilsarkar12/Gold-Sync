@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSyncStatus } from '@/lib/db';
+import { getSyncStatus, setSyncStatus } from '@/lib/db';
 import { runProductSync } from '@/lib/sync';
 
 export const maxDuration = 300; // Allow Vercel up to 5 minutes to complete the sync
@@ -14,6 +14,16 @@ export async function POST() {
         return NextResponse.json({ message: 'Sync already in progress.' }, { status: 200 });
       }
     }
+
+    // Immediately mark sync as running in DB with empty lastResult
+    await setSyncStatus({
+      syncing: true,
+      startedAt: new Date().toISOString(),
+      lastResult: null,
+      isAuto: false,
+      totalItems: 0,
+      completedItems: 0,
+    });
 
     // Run sync in background (don't await — return immediately so UI doesn't block)
     runProductSync(false).catch((err) => {

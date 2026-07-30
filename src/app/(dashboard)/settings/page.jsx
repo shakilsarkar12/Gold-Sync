@@ -11,9 +11,92 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [modalStage, setModalStage] = useState('idle'); // 'idle' | 'syncing-mf' | 'prompt-price-sync' | 'syncing-prices' | 'sync-complete'
+  const [mfStatus, setMfStatus] = useState(null);
+  const [modalSyncStatus, setModalSyncStatus] = useState(null);
   const readOnly = false; // Settings are editable at runtime
   // Snapshot of last saved settings from DB, used to detect changes
   const [savedSettings, setSavedSettings] = useState(null);
+
+  const startMakingChargeSync = async () => {
+    setShowSyncModal(true);
+    setModalStage('syncing-mf');
+    setMfStatus({ syncing: true, completedItems: 0, totalItems: 0, message: '[MakingCharge MF] Starting making charge metafield sync...' });
+
+    try {
+      const res = await fetch('/api/settings/sync-mf', { method: 'POST' });
+      if (!res.ok) {
+        throw new Error('Failed to start making charge sync');
+      }
+
+      let hasBeenSyncing = false;
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch('/api/settings/sync-mf', { cache: 'no-store' });
+          if (statusRes.ok) {
+            const data = await statusRes.json();
+            setMfStatus(data);
+
+            if (data.syncing) {
+              hasBeenSyncing = true;
+            }
+
+            if (!data.syncing && (hasBeenSyncing || data.completed)) {
+              clearInterval(pollInterval);
+              setTimeout(() => {
+                setModalStage('prompt-price-sync');
+              }, 1200);
+            }
+          }
+        } catch (err) {
+          console.error("Error polling making charge status:", err);
+        }
+      }, 1000);
+    } catch (error) {
+      showToast(error.message || 'Error syncing making charge', 'error');
+      setModalStage('prompt-price-sync');
+    }
+  };
+
+  const handleStartPriceSyncFromModal = async () => {
+    setModalStage('syncing-prices');
+    setModalSyncStatus({ syncing: true, completedItems: 0, totalItems: 0 });
+
+    try {
+      const res = await fetch('/api/sync-now', { method: 'POST' });
+      if (!res.ok) {
+        throw new Error('Failed to start price sync');
+      }
+
+      let hasBeenSyncing = false;
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch('/api/sync-status', { cache: 'no-store' });
+          if (statusRes.ok) {
+            const data = await statusRes.json();
+            setModalSyncStatus(data);
+
+            if (data.syncing) {
+              hasBeenSyncing = true;
+            }
+
+            if (!data.syncing && (hasBeenSyncing || data.lastResult !== null)) {
+              clearInterval(pollInterval);
+              setModalStage('sync-complete');
+            }
+          }
+        } catch (err) {
+          console.error("Error polling sync status:", err);
+        }
+      }, 1000);
+
+    } catch (error) {
+      showToast(error.message || 'Error starting sync', 'error');
+      setModalStage('prompt-price-sync');
+    }
+  };
   
   const [settings, setSettings] = useState({
     shopifyShop: '',
@@ -271,8 +354,11 @@ export default function SettingsPage() {
       setSavedSettings(settings);
       showToast(data.message || 'Settings saved successfully', 'success');
 
-      if (pricingChanged) {
+      if (data.makingChargeChanged) {
+        startMakingChargeSync();
+      } else if (pricingChanged) {
         setShowSyncModal(true);
+        setModalStage('prompt-price-sync');
       }
 
       // Removed: Do not automatically trigger price sync when settings change.
@@ -1226,71 +1312,176 @@ export default function SettingsPage() {
         </div>
       </form>
 
-      {/* Sync Prompt Popup Modal */}
+      {/* Multi-Stage Sync & Prompt Modal */}
       {showSyncModal && (
         <div style={{
           position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(5px)',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.82)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 9999,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 9999,
+          padding: '1rem',
           animation: 'fadeIn 0.2s ease-out'
         }}>
           <div className="glass-card" style={{
-            maxWidth: '460px',
-            width: '90%',
+            maxWidth: '480px',
+            width: '92%',
             padding: '1.75rem',
             borderRadius: '16px',
-            border: '1px solid rgba(212, 175, 55, 0.4)',
-            boxShadow: '0 20px 50px rgba(0,0,0,0.8), 0 0 30px rgba(212, 175, 55, 0.15)',
+            border: `1px solid ${modalStage === 'sync-complete' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(212, 175, 55, 0.4)'}`,
+            boxShadow: modalStage === 'sync-complete'
+              ? '0 20px 50px rgba(0,0,0,0.8), 0 0 30px rgba(16, 185, 129, 0.15)'
+              : '0 20px 50px rgba(0,0,0,0.8), 0 0 30px rgba(212, 175, 55, 0.15)',
             textAlign: 'center'
           }}>
             <div style={{
               width: '56px',
               height: '56px',
               borderRadius: '50%',
-              backgroundColor: 'rgba(212, 175, 55, 0.15)',
-              border: '1px solid rgba(212, 175, 55, 0.3)',
+              backgroundColor: modalStage === 'sync-complete' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(212, 175, 55, 0.15)',
+              border: `1px solid ${modalStage === 'sync-complete' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(212, 175, 55, 0.3)'}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 1.25rem auto'
             }}>
-              <RefreshCw size={26} style={{ color: 'var(--gold-primary)' }} />
+              {(modalStage === 'syncing-mf' || modalStage === 'syncing-prices') ? (
+                <RefreshCw size={26} className="animate-spin" style={{ color: 'var(--gold-primary)' }} />
+              ) : modalStage === 'sync-complete' ? (
+                <Check size={28} style={{ color: '#10b981' }} />
+              ) : (
+                <RefreshCw size={26} style={{ color: 'var(--gold-primary)' }} />
+              )}
             </div>
 
-            <h3 className="luxury-text" style={{ fontSize: '1.2rem', marginBottom: '0.6rem', color: '#fff' }}>
-              Update Variant Prices Now?
+            <h3 className="luxury-text" style={{ fontSize: '1.2rem', marginBottom: '0.75rem', color: '#fff' }}>
+              {modalStage === 'syncing-mf' && 'Updating Making Charge Metafields...'}
+              {modalStage === 'prompt-price-sync' && 'Update Variant Prices Now?'}
+              {modalStage === 'syncing-prices' && 'Syncing Variant Prices...'}
+              {modalStage === 'sync-complete' && 'Sync Completed!'}
             </h3>
-            <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', lineHeight: '1.5' }}>
-              Settings saved successfully! Pricing rules have been updated. Would you like to go to the <strong>Products Page</strong> to sync product variant prices now?
-            </p>
 
+            {/* Log / Progress Messages */}
+            <div style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', lineHeight: '1.5', textAlign: modalStage === 'prompt-price-sync' ? 'left' : 'center' }}>
+              {modalStage === 'syncing-mf' && (
+                <div>
+                  <p style={{ color: 'var(--gold-primary)', fontWeight: 600, marginBottom: '0.3rem' }}>
+                    {mfStatus?.message || '[MakingCharge MF] Updating making charge metafields...'}
+                  </p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Applying Making Charge per gram ({settings.makingChargePerGram}) to all product metafields.
+                  </p>
+                </div>
+              )}
+
+              {modalStage === 'prompt-price-sync' && (
+                <div style={{ backgroundColor: 'rgba(0,0,0,0.3)', padding: '0.85rem 1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <p style={{ color: '#10b981', fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem', fontFamily: 'monospace' }}>
+                    ✔ [MakingCharge MF] Updated making charge metafields for {mfStatus?.totalItems || 'all'} products.
+                  </p>
+                  <p style={{ color: 'var(--gold-primary)', fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.6rem', fontFamily: 'monospace' }}>
+                    ✔ [Settings] Making Charge updated to {settings.makingChargePerGram}. Synced {mfStatus?.totalItems || 'all'} products' metafields.
+                  </p>
+                  <p style={{ fontSize: '0.88rem', color: '#fff', marginTop: '0.5rem', lineHeight: '1.4' }}>
+                    Would you like to sync product variant prices to Shopify now?
+                  </p>
+                </div>
+              )}
+
+              {modalStage === 'syncing-prices' && (
+                <div>
+                  <p style={{ color: 'var(--gold-primary)', fontWeight: 600, marginBottom: '0.3rem' }}>
+                    Updating variant prices and breakdown metafields in bulk...
+                  </p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Calculating prices and pushing updates to Shopify. Please wait...
+                  </p>
+                </div>
+              )}
+
+              {modalStage === 'sync-complete' && (
+                <div>
+                  <p style={{ color: '#10b981', fontWeight: 600, marginBottom: '0.4rem' }}>
+                    Settings saved and all product prices and metafields updated successfully!
+                  </p>
+                  {modalSyncStatus?.lastResult?.successCount !== undefined && (
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                      Updated {modalSyncStatus.lastResult.successCount} variants on Shopify.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Live Progress Bar for Making Charge or Price Sync */}
+            {(modalStage === 'syncing-mf' || modalStage === 'syncing-prices') && (
+              <div style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--gold-primary)', marginBottom: '0.4rem', fontWeight: 600 }}>
+                  <span>
+                    {modalStage === 'syncing-mf' ? 'Syncing Metafields' : 'Syncing Prices'}
+                  </span>
+                  <span>
+                    {modalStage === 'syncing-mf'
+                      ? `${mfStatus?.completedItems || 0} / ${mfStatus?.totalItems || 0}`
+                      : `${modalSyncStatus?.completedItems || 0} / ${modalSyncStatus?.totalItems || 0}`}
+                  </span>
+                </div>
+                <div style={{ width: '100%', height: '8px', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%',
+                    width: modalStage === 'syncing-mf'
+                      ? `${mfStatus?.totalItems ? Math.min(100, Math.round(((mfStatus.completedItems || 0) / mfStatus.totalItems) * 100)) : 5}%`
+                      : `${modalSyncStatus?.totalItems ? Math.min(100, Math.round(((modalSyncStatus.completedItems || 0) / modalSyncStatus.totalItems) * 100)) : 5}%`,
+                    backgroundColor: 'var(--gold-primary)',
+                    borderRadius: '4px',
+                    transition: 'width 0.4s ease'
+                  }} />
+                </div>
+              </div>
+            )}
+
+            {/* Buttons */}
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
-                style={{ flex: 1, padding: '0.6rem 1rem' }}
-                onClick={() => setShowSyncModal(false)}
+                style={{
+                  flex: 1,
+                  padding: '0.6rem 1rem',
+                  opacity: (modalStage === 'syncing-mf' || modalStage === 'syncing-prices') ? 0.5 : 1,
+                  cursor: (modalStage === 'syncing-mf' || modalStage === 'syncing-prices') ? 'not-allowed' : 'pointer'
+                }}
+                disabled={modalStage === 'syncing-mf' || modalStage === 'syncing-prices'}
+                onClick={() => {
+                  setShowSyncModal(false);
+                  setModalStage('idle');
+                }}
               >
-                No
+                {modalStage === 'sync-complete' ? 'Close' : 'No'}
               </button>
               <button
                 type="button"
                 className="btn btn-primary"
-                style={{ flex: 1, padding: '0.6rem 1rem' }}
+                style={{
+                  flex: 1,
+                  padding: '0.6rem 1rem',
+                  opacity: (modalStage === 'syncing-mf' || modalStage === 'syncing-prices') ? 0.5 : 1,
+                  cursor: (modalStage === 'syncing-mf' || modalStage === 'syncing-prices') ? 'not-allowed' : 'pointer'
+                }}
+                disabled={modalStage === 'syncing-mf' || modalStage === 'syncing-prices'}
                 onClick={() => {
-                  setShowSyncModal(false);
-                  router.push('/products');
+                  if (modalStage === 'sync-complete') {
+                    setShowSyncModal(false);
+                    setModalStage('idle');
+                  } else {
+                    handleStartPriceSyncFromModal();
+                  }
                 }}
               >
-                Yes
+                {modalStage === 'sync-complete' ? 'Done' : 'Yes'}
               </button>
             </div>
           </div>

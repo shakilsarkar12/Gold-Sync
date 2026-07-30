@@ -78,10 +78,15 @@ const DEFAULT_SETTINGS = {
   },
 };
 
-let mysqlPool = null;
-let dbInitialized = false;
+let mysqlPool = global.__mysqlPool || null;
+let dbInitialized = global.__dbInitialized || false;
 
 async function getMysqlPool() {
+  // If MySQL hit max_connections_per_hour error recently, temporarily use local fallback for 60 seconds
+  if (global.__mysqlDisabledUntil && Date.now() < global.__mysqlDisabledUntil) {
+    return null;
+  }
+
   const host = process.env.MYSQL_HOST;
   const user = process.env.MYSQL_USER;
   const password = process.env.MYSQL_PASSWORD;
@@ -99,18 +104,24 @@ async function getMysqlPool() {
         password,
         database,
         waitForConnections: true,
-        connectionLimit: 10,
+        connectionLimit: 5,
         queueLimit: 0,
         enableKeepAlive: true,
-        keepAliveInitialDelay: 0,
-        connectTimeout: 20000,
+        keepAliveInitialDelay: 10000,
+        connectTimeout: 10000,
       });
 
       // Test connection
       await mysqlPool.query('SELECT 1');
+      global.__mysqlPool = mysqlPool;
     } catch (error) {
       console.error('Failed to connect to MySQL:', error.message);
+      if (error.message && (error.message.includes('max_connections_per_hour') || error.code === 'ER_USER_LIMIT_REACHED')) {
+        console.warn('[DB] MySQL connection limit per hour reached. Temporarily switching to in-memory/file storage for 60s.');
+        global.__mysqlDisabledUntil = Date.now() + 60000;
+      }
       mysqlPool = null;
+      global.__mysqlPool = null;
       return null;
     }
   }
@@ -128,6 +139,7 @@ async function getMysqlPool() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
       dbInitialized = true;
+      global.__dbInitialized = true;
     } catch (err) {
       console.error('Failed to initialize MySQL table:', err.message);
     }
@@ -345,23 +357,51 @@ export async function saveSchedulerState(state) {
 }
 
 export async function getSyncStatus() {
+  if (global.__syncStatus) {
+    return global.__syncStatus;
+  }
   const pool = await getMysqlPool();
   if (pool) {
     const doc = await getDoc('sync_status', 'status');
-    if (doc) return doc;
-    return { syncing: false, lastResult: null };
+    if (doc) {
+      global.__syncStatus = doc;
+      return doc;
+    }
   }
   return global.__syncStatus || { syncing: false, lastResult: null };
 }
 
 export async function setSyncStatus(status) {
+  global.__syncStatus = { ...(global.__syncStatus || {}), ...status };
   const pool = await getMysqlPool();
   if (pool) {
-    await setDoc('sync_status', 'status', status);
-    return status;
+    await setDoc('sync_status', 'status', global.__syncStatus);
   }
-  global.__syncStatus = { ...global.__syncStatus, ...status };
-  return status;
+  return global.__syncStatus;
+}
+
+export async function getMakingChargeStatus() {
+  if (global.__makingChargeStatus) {
+    return global.__makingChargeStatus;
+  }
+  const pool = await getMysqlPool();
+  if (pool) {
+    const doc = await getDoc('sync_status', 'making_charge_status');
+    if (doc) {
+      global.__makingChargeStatus = doc;
+      return doc;
+    }
+  }
+  return global.__makingChargeStatus || { syncing: false, completedItems: 0, totalItems: 0, message: '' };
+}
+
+export async function setMakingChargeStatus(status) {
+  global.__makingChargeStatus = { ...(global.__makingChargeStatus || {}), ...status };
+  const pool = await getMysqlPool();
+  if (pool) {
+    await setDoc('sync_status', 'making_charge_status', global.__makingChargeStatus);
+  }
+  return global.__makingChargeStatus;
 }
 
 export async function getProductsCache() {

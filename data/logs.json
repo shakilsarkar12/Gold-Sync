@@ -2,6 +2,22 @@
   {
     "status": "success",
     "type": "bulk",
+    "details": "Manual Sync: updated 18 variant prices + metafields.",
+    "productsUpdated": 18,
+    "id": "log_1785409450023_br2d4iawx",
+    "timestamp": "2026-07-30T11:04:10.023Z"
+  },
+  {
+    "status": "success",
+    "type": "bulk",
+    "details": "Bulk Operation completed successfully for 54 variants.",
+    "productsUpdated": 54,
+    "id": "log_1785409266836_mkqpzit2m",
+    "timestamp": "2026-07-30T11:01:06.836Z"
+  },
+  {
+    "status": "success",
+    "type": "bulk",
     "details": "Auto Sync: successfully updated 23 variant prices.",
     "productsUpdated": 23,
     "id": "log_1780742792557_ba0xm5yio",
