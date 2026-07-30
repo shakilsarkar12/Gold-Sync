@@ -101,6 +101,9 @@ async function getMysqlPool() {
         waitForConnections: true,
         connectionLimit: 10,
         queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 0,
+        connectTimeout: 20000,
       });
 
       // Test connection
@@ -133,8 +136,8 @@ async function getMysqlPool() {
   return mysqlPool;
 }
 
-// Helper for NoSQL-like operations in MySQL
-async function getDoc(collection, doc_id) {
+// Helper for NoSQL-like operations in MySQL with auto-reconnect retry
+async function getDoc(collection, doc_id, isRetry = false) {
   const pool = await getMysqlPool();
   if (!pool) return null;
   try {
@@ -154,12 +157,16 @@ async function getDoc(collection, doc_id) {
       return data;
     }
   } catch (error) {
+    if ((error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST') && !isRetry) {
+      mysqlPool = null;
+      return getDoc(collection, doc_id, true);
+    }
     console.error(`MySQL getDoc error (${collection}/${doc_id}):`, error.message);
   }
   return null;
 }
 
-async function setDoc(collection, doc_id, data) {
+async function setDoc(collection, doc_id, data, isRetry = false) {
   const pool = await getMysqlPool();
   if (!pool) return false;
   try {
@@ -171,6 +178,10 @@ async function setDoc(collection, doc_id, data) {
     );
     return true;
   } catch (error) {
+    if ((error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST') && !isRetry) {
+      mysqlPool = null;
+      return setDoc(collection, doc_id, data, true);
+    }
     console.error(`MySQL setDoc error (${collection}/${doc_id}):`, error.message);
     return false;
   }

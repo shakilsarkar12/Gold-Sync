@@ -1,13 +1,16 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/Toast';
-import { Save, Calculator } from 'lucide-react';
+import { Save, Calculator, Check, RefreshCw } from 'lucide-react';
 
 export default function SettingsPage() {
+  const router = useRouter();
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
   const readOnly = false; // Settings are editable at runtime
   // Snapshot of last saved settings from DB, used to detect changes
   const [savedSettings, setSavedSettings] = useState(null);
@@ -263,9 +266,14 @@ export default function SettingsPage() {
 
       const data = await res.json();
 
+      const pricingChanged = hasPricingChanges;
       // Update the saved snapshot so button becomes disabled again
       setSavedSettings(settings);
       showToast(data.message || 'Settings saved successfully', 'success');
+
+      if (pricingChanged) {
+        setShowSyncModal(true);
+      }
 
       // Removed: Do not automatically trigger price sync when settings change.
       // Price sync should only be triggered manually from the products page or via scheduled auto-sync.
@@ -958,19 +966,19 @@ export default function SettingsPage() {
 
           <div className="glass-card" style={{ maxHeight: '420px', overflowY: 'auto' }}>
             <h2 className="card-title luxury-text">
-              <span>Diamond Price Matrix (per crt)</span>
+              <span>Gemstone Price Matrix (per crt)</span>
             </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-              Define lab-grown VS diamond prices per carat for shapes and color grades.
+              Define gemstone prices per carat for shapes and Gemstone Quality grades (D, E-F, G-H).
             </p>
 
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'center' }}>
                   <th style={{ textAlign: 'left', padding: '0.5rem 0' }}>Shape</th>
-                  <th style={{ padding: '0.5rem 0' }}>D Color</th>
-                  <th style={{ padding: '0.5rem 0' }}>E-F Color</th>
-                  <th style={{ padding: '0.5rem 0' }}>G-H Color</th>
+                  <th style={{ padding: '0.5rem 0' }}>D</th>
+                  <th style={{ padding: '0.5rem 0' }}>E-F</th>
+                  <th style={{ padding: '0.5rem 0' }}>G-H</th>
                 </tr>
               </thead>
               <tbody>
@@ -1057,7 +1065,7 @@ export default function SettingsPage() {
                 onChange={(e) => setSimUseMatrix(e.target.checked)}
               />
               <label htmlFor="simUseMatrix" className="form-label" style={{ marginBottom: 0, cursor: 'pointer', fontSize: '0.85rem' }}>
-                Use Diamond Price Matrix
+                Use Gemstone Price Matrix
               </label>
             </div>
 
@@ -1190,13 +1198,104 @@ export default function SettingsPage() {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-            <button type="submit" className="btn btn-primary" disabled={saving || !hasChanges} title={!hasChanges ? 'No changes to save' : ''}>
-              <Save size={16} className={saving ? 'animate-spin' : ''} />
-              <span>{saving ? 'Saving...' : 'Save Settings'}</span>
+            <button
+              type="submit"
+              className={`btn ${hasChanges ? 'btn-primary' : 'btn-secondary'}`}
+              disabled={saving || !hasChanges}
+              title={!hasChanges ? 'All changes saved' : 'Click to save settings'}
+              style={{ minWidth: '130px' }}
+            >
+              {saving ? (
+                <>
+                  <Save size={16} className="animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : hasChanges ? (
+                <>
+                  <Save size={16} />
+                  <span>Save Settings</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} style={{ color: '#10b981' }} />
+                  <span>Saved</span>
+                </>
+              )}
             </button>
           </div>
         </div>
       </form>
+
+      {/* Sync Prompt Popup Modal */}
+      {showSyncModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div className="glass-card" style={{
+            maxWidth: '460px',
+            width: '90%',
+            padding: '1.75rem',
+            borderRadius: '16px',
+            border: '1px solid rgba(212, 175, 55, 0.4)',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.8), 0 0 30px rgba(212, 175, 55, 0.15)',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(212, 175, 55, 0.15)',
+              border: '1px solid rgba(212, 175, 55, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1.25rem auto'
+            }}>
+              <RefreshCw size={26} style={{ color: 'var(--gold-primary)' }} />
+            </div>
+
+            <h3 className="luxury-text" style={{ fontSize: '1.2rem', marginBottom: '0.6rem', color: '#fff' }}>
+              Update Variant Prices Now?
+            </h3>
+            <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', lineHeight: '1.5' }}>
+              Settings saved successfully! Pricing rules have been updated. Would you like to go to the <strong>Products Page</strong> to sync product variant prices now?
+            </p>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ flex: 1, padding: '0.6rem 1rem' }}
+                onClick={() => setShowSyncModal(false)}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1, padding: '0.6rem 1rem' }}
+                onClick={() => {
+                  setShowSyncModal(false);
+                  router.push('/products');
+                }}
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Gem, History, Settings, Coins, LogOut, Database } from 'lucide-react';
+import { LayoutDashboard, Gem, History, Settings, Coins, LogOut, Database, Layers } from 'lucide-react';
 import { useToast } from '@/components/Toast';
 
 export default function Sidebar() {

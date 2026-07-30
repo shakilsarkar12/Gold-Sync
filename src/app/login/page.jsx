@@ -9,6 +9,7 @@ import './login.css';
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -22,7 +23,7 @@ export default function LoginPage() {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, rememberMe }),
       });
 
       const data = await response.json();
@@ -77,7 +78,7 @@ export default function LoginPage() {
             </div>
           </div>
           
-          <div className="form-group" style={{ marginBottom: '2.5rem' }}>
+          <div className="form-group" style={{ marginBottom: '1.25rem' }}>
             <label className="form-label">Password</label>
             <div className="search-input-wrapper" style={{ maxWidth: '100%' }}>
               <Lock className="search-icon" size={18} />
@@ -111,6 +112,23 @@ export default function LoginPage() {
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.9rem', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                style={{
+                  accentColor: 'var(--gold-primary)',
+                  width: '16px',
+                  height: '16px',
+                  cursor: 'pointer'
+                }}
+              />
+              <span>Remember login for 30 days</span>
+            </label>
           </div>
 
           <button 

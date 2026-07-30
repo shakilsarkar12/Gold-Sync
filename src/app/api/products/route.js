@@ -64,7 +64,7 @@ export async function GET(request) {
         isAnyVariantGold = true;
 
         // Run calculation: weight and diamond details are resolved with variant priority
-        const { finalPrice, breakdown } = calculateVariantPrice({
+        const { finalPrice, compareAtPrice, breakdown } = calculateVariantPrice({
           weight: vWeight,
           karatStr: vKarat,
           diamondPrice: product.diamondPrice,
@@ -76,8 +76,10 @@ export async function GET(request) {
           variantTitle: variant.title
         });
 
-        const diff = Math.abs(parseFloat(variant.price) - finalPrice);
-        const outOfSync = diff > 0.05;
+        const priceDiff = Math.abs(parseFloat(variant.price) - finalPrice);
+        const currentCompareAt = parseFloat(variant.compareAtPrice) || 0;
+        const compareDiff = Math.abs(currentCompareAt - compareAtPrice);
+        const outOfSync = priceDiff > 0.05 || compareDiff > 0.05;
 
         if (outOfSync) {
           productOutOfSync = true;
@@ -87,6 +89,7 @@ export async function GET(request) {
           ...variant,
           isGoldVariant: true,
           calculatedPrice: finalPrice,
+          calculatedCompareAtPrice: compareAtPrice,
           priceBreakdown: breakdown,
           outOfSync,
         };
@@ -183,8 +186,16 @@ export async function POST(request) {
         }
       }
 
-      // 2. Update the variant price in Shopify
-      await updateShopifyVariantPricesBulk(productId, [{ id: variantId, price: newPrice.toString() }]);
+      // 2. Update the variant price and compareAtPrice in Shopify
+      const calculatedCompareAt = payload.compareAtPrice !== undefined && payload.compareAtPrice !== null
+        ? payload.compareAtPrice
+        : (parseFloat(newPrice) * 2).toFixed(2);
+
+      await updateShopifyVariantPricesBulk(productId, [{
+        id: variantId,
+        price: newPrice.toString(),
+        compareAtPrice: calculatedCompareAt.toString()
+      }]);
       
       // 3. Update the global Gold Rate Metafields (14K, 18K etc.)
       const settings = await getSettings();
@@ -194,7 +205,7 @@ export async function POST(request) {
       await addLog({
         status: 'success',
         type: 'single',
-        details: `Updated '${productTitle}' (${variantTitle || 'Default'}) price from $${oldPrice} to $${newPrice}`,
+        details: `Updated '${productTitle}' (${variantTitle || 'Default'}) price to $${newPrice} (Compare at $${calculatedCompareAt})`,
         productsUpdated: 1,
       });
 
@@ -207,6 +218,60 @@ export async function POST(request) {
         return NextResponse.json({ error: 'items array is required' }, { status: 400 });
       }
 
+      if (items.length === 0) {
+        return NextResponse.json({ success: true, count: 0, message: 'No items to sync' });
+      }
+
+      // If updating 50 or more items, use Shopify Bulk Operations API (JSONL Upload)
+      // to handle 22,000+ variants without HTTP timeouts or rate limit issues
+      if (items.length >= 50) {
+        const groupedByProduct = {};
+        for (const item of items) {
+          if (!groupedByProduct[item.productId]) {
+            groupedByProduct[item.productId] = [];
+          }
+          groupedByProduct[item.productId].push(item);
+        }
+
+        let jsonlString = '';
+        const productIds = Object.keys(groupedByProduct);
+        for (const pid of productIds) {
+          const pItems = groupedByProduct[pid];
+          const variants = pItems.map((item) => {
+            const cap = item.compareAtPrice !== undefined && item.compareAtPrice !== null
+              ? item.compareAtPrice
+              : (parseFloat(item.newPrice) * 2).toFixed(2);
+            return {
+              id: item.variantId,
+              price: item.newPrice.toString(),
+              compareAtPrice: cap.toString(),
+            };
+          });
+          jsonlString += JSON.stringify({ productId: pid, variants }) + '\n';
+        }
+
+        const { runBulkProductVariantsUpdate } = await import('@/lib/shopify');
+        const bulkOperationId = await runBulkProductVariantsUpdate(jsonlString);
+
+        await setSyncStatus({
+          syncing: true,
+          startedAt: new Date().toISOString(),
+          isAuto: false,
+          totalItems: items.length,
+          completedItems: 0,
+          bulkOperationId,
+        });
+
+        return NextResponse.json({
+          success: true,
+          queued: true,
+          bulkOperationId,
+          totalItems: items.length,
+          message: `Queued bulk sync for ${items.length} variants on Shopify. Progress will update automatically.`,
+        });
+      }
+
+      // For small updates (< 50 items), update synchronously
       let successCount = 0;
       let failCount = 0;
       const errors = [];
@@ -247,8 +312,16 @@ export async function POST(request) {
             }
           }
 
-          // 2. Update the price
-          await updateShopifyVariantPricesBulk(item.productId, [{ id: item.variantId, price: item.newPrice.toString() }]);
+          // 2. Update the price and compareAtPrice
+          const itemCap = item.compareAtPrice !== undefined && item.compareAtPrice !== null
+            ? item.compareAtPrice
+            : (parseFloat(item.newPrice) * 2).toFixed(2);
+
+          await updateShopifyVariantPricesBulk(item.productId, [{
+            id: item.variantId,
+            price: item.newPrice.toString(),
+            compareAtPrice: itemCap.toString()
+          }]);
           successCount++;
         } catch (err) {
           failCount++;

@@ -43,7 +43,7 @@ async function refreshShopifyToken(shop) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function shopifyGraphQL(query, variables = {}, retries = 3) {
+export async function shopifyGraphQL(query, variables = {}, retries = 3) {
   const settings = await getSettings();
   const shop = settings.shopifyShop;
 
@@ -227,6 +227,7 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
                   id
                   title
                   price
+                  compareAtPrice
                   sku
                   selectedOptions {
                     name
@@ -327,11 +328,37 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       ? parseFloat(variant.vCrtMetafield.value)
       : titleCrt;
 
+    // Check selectedOptions for gold karat option (e.g., Gold, Karat)
+    const karatOption = (variant.selectedOptions || []).find((o) => {
+      const name = (o.name || '').toLowerCase();
+      return name === 'gold' || name === 'karat' || name.includes('karat');
+    });
     const karatValue = variant.vKaratMetafield?.value
       ? variant.vKaratMetafield.value
-      : titleKarat;
+      : (karatOption ? karatOption.value : titleKarat);
 
-    // Check if variant has an option named "Gold" (e.g. 14K, 18K)
+    // Check selectedOptions for diamond color / gemstone quality (e.g. Gemstone Quality, Diamond Color, Color)
+    // or option value matching D, E-F, G-H
+    const colorOption = (variant.selectedOptions || []).find((o) => {
+      const name = (o.name || '').toLowerCase();
+      const val = (o.value || '').trim().toUpperCase();
+      if (name.includes('gemstone') || name.includes('color') || name.includes('quality') || name.includes('diamond')) {
+        return true;
+      }
+      return val === 'D' || /^E[\s\-\/]*F$/i.test(val) || /^G[\s\-\/]*H$/i.test(val);
+    });
+    const optionColorValue = colorOption ? colorOption.value : null;
+
+    // Priority: selectedOption (Gemstone Quality D, E-F, G-H) -> variant metafield -> null
+    const colorValue = optionColorValue || variant.vColorMetafield?.value || null;
+
+    // Check selectedOptions for shape (e.g., Shape, Diamond Shape)
+    const shapeOption = (variant.selectedOptions || []).find((o) => {
+      const name = (o.name || '').toLowerCase();
+      return name.includes('shape');
+    });
+    const shapeValue = shapeOption ? shapeOption.value : (variant.vShapeMetafield?.value || null);
+
     const goldOption = (variant.selectedOptions || []).find(
       (o) => o.name.toLowerCase() === 'gold'
     );
@@ -340,15 +367,16 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       id: variant.id,
       title: variant.title,
       price: variant.price,
+      compareAtPrice: variant.compareAtPrice || null,
       sku: variant.sku || null,
       selectedOptions: variant.selectedOptions || [],
       isGoldVariant: true,
       goldOptionValue: goldOption ? goldOption.value : null, // e.g. "14K", "18K"
       weightValue: variant.vWeightMetafield?.value ? parseFloat(variant.vWeightMetafield.value) : null,
       karatValue,
-      shapeValue: variant.vShapeMetafield?.value || null,
+      shapeValue,
       crtValue,
-      colorValue: variant.vColorMetafield?.value || null,
+      colorValue,
       smallDiamondGrade: variant.vSmallDiamGradeMetafield?.value || null,
       smallDiamondWeight: variant.vSmallDiamWeightMetafield?.value
         ? parseFloat(variant.vSmallDiamWeightMetafield.value)
@@ -393,6 +421,7 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
                 id
                 title
                 price
+                compareAtPrice
                 sku
                 selectedOptions {
                   name
@@ -550,7 +579,7 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
 
 
 export async function updateShopifyVariantPricesBulk(productId, variantsUpdates) {
-  // variantsUpdates should be an array of { id: variantId, price: newPrice }
+  // variantsUpdates should be an array of { id: variantId, price: newPrice, compareAtPrice?: compareAtPrice }
   if (!variantsUpdates || variantsUpdates.length === 0) return true;
 
   const mutation = `
@@ -559,6 +588,7 @@ export async function updateShopifyVariantPricesBulk(productId, variantsUpdates)
         productVariants {
           id
           price
+          compareAtPrice
         }
         userErrors {
           field
@@ -568,9 +598,22 @@ export async function updateShopifyVariantPricesBulk(productId, variantsUpdates)
     }
   `;
 
+  const formattedVariants = variantsUpdates.map((v) => {
+    const p = parseFloat(v.price) || 0;
+    const cap = v.compareAtPrice !== undefined && v.compareAtPrice !== null && v.compareAtPrice !== ''
+      ? parseFloat(v.compareAtPrice)
+      : p * 2;
+
+    return {
+      id: v.id,
+      price: p.toFixed(2),
+      compareAtPrice: cap.toFixed(2),
+    };
+  });
+
   const variables = {
     productId,
-    variants: variantsUpdates,
+    variants: formattedVariants,
   };
 
   const data = await shopifyGraphQL(mutation, variables);
@@ -803,8 +846,16 @@ export async function runBulkProductVariantsUpdate(jsonlString) {
 
   // 2. Upload the JSONL file
   const formData = new FormData();
+  let uploadedKey = null;
   for (const param of target.parameters) {
-    formData.append(param.name, param.value);
+    let val = param.value;
+    if (param.name === 'key') {
+      if (val.includes('${filename}')) {
+        val = val.replace('${filename}', 'bulk_updates.jsonl');
+      }
+      uploadedKey = val;
+    }
+    formData.append(param.name, val);
   }
   formData.append('file', new Blob([jsonlString], { type: 'text/jsonl' }), 'bulk_updates.jsonl');
 
@@ -818,7 +869,19 @@ export async function runBulkProductVariantsUpdate(jsonlString) {
     throw new Error(`Failed to upload to Shopify staged target: ${uploadRes.status} ${errText}`);
   }
 
-  // 3. Trigger bulk operation
+  // 3. Extract relative key path for stagedUploadPath
+  // Shopify requires the key (e.g. "tmp/74829201563/bulk/...") instead of full URL
+  let stagedUploadPath = uploadedKey || target.parameters?.find(p => p.name === 'key')?.value || target.resourceUrl;
+  if (stagedUploadPath && stagedUploadPath.startsWith('http')) {
+    try {
+      const urlObj = new URL(stagedUploadPath);
+      stagedUploadPath = urlObj.pathname.replace(/^\//, '');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // 4. Trigger bulk operation
   const bulkMutation = `
     mutation bulkOperationRunMutation($stagedUploadPath: String!) {
       bulkOperationRunMutation(
@@ -836,7 +899,7 @@ export async function runBulkProductVariantsUpdate(jsonlString) {
       }
     }
   `;
-  const bulkData = await shopifyGraphQL(bulkMutation, { stagedUploadPath: target.resourceUrl });
+  const bulkData = await shopifyGraphQL(bulkMutation, { stagedUploadPath });
   const bulkOp = bulkData.bulkOperationRunMutation?.bulkOperation;
   const userErrs = bulkData.bulkOperationRunMutation?.userErrors;
 
@@ -936,7 +999,7 @@ export async function updateVariantBreakdownMetafields(variantsData, settings) {
 export async function getCurrentBulkOperation() {
   const query = `
     query {
-      currentBulkOperation {
+      currentBulkOperation(type: MUTATION) {
         id
         status
         errorCode
@@ -949,8 +1012,13 @@ export async function getCurrentBulkOperation() {
       }
     }
   `;
-  const data = await shopifyGraphQL(query);
-  return data.currentBulkOperation;
+  try {
+    const data = await shopifyGraphQL(query);
+    return data.currentBulkOperation || null;
+  } catch (error) {
+    console.error('Failed to query currentBulkOperation:', error);
+    return null;
+  }
 }
 
 /**

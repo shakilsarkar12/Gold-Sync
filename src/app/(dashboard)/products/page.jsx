@@ -5,6 +5,7 @@ import { useToast } from '@/components/Toast';
 import {
   Search,
   RefreshCw,
+  RotateCw,
   AlertCircle,
   ArrowUpRight,
   Save,
@@ -17,6 +18,7 @@ export default function ProductsPage() {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [syncingId, setSyncingId] = useState(null);
   const [savingMetafieldsId, setSavingMetafieldsId] = useState(null);
   const [products, setProducts] = useState([]);
@@ -81,6 +83,19 @@ export default function ProductsPage() {
     /* eslint-disable-next-line react-hooks/set-state-in-effect */
     fetchProducts();
   }, [fetchProducts]);
+
+  const handleRefreshProducts = async () => {
+    setRefreshing(true);
+    showToast('Fetching latest product data live from Shopify...', 'info');
+    try {
+      await fetchProducts(true);
+      showToast('Catalog refreshed successfully from Shopify!', 'success');
+    } catch (error) {
+      showToast(error.message || 'Failed to refresh products from Shopify', 'error');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleMetafieldChange = (productId, field, value) => {
     setEditedMetafields((prev) => ({
@@ -301,7 +316,9 @@ export default function ProductsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed bulk sync');
 
-      if (data.success) {
+      if (data.queued) {
+        showToast(`Bulk sync queued for ${data.totalItems} variants. Updating on Shopify...`, 'info');
+      } else if (data.success) {
         showToast(`Successfully synced ${data.successCount} variants`, 'success');
       } else {
         showToast(`Sync completed with ${data.failCount} errors`, 'warning');
@@ -424,7 +441,16 @@ export default function ProductsPage() {
           <h1 className="page-title luxury-text">Catalog Management</h1>
           <p className="page-subtitle">Update gold weights and diamond prices at product level, and sync variant prices</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <button
+            onClick={handleRefreshProducts}
+            className="btn btn-secondary"
+            disabled={refreshing || loading}
+            title="Fetch updated product data live from Shopify"
+          >
+            <RotateCw className={refreshing ? 'animate-spin' : ''} size={16} />
+            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+          </button>
           {selectedVariants.size > 0 && (
             <button
               onClick={handleSyncSelected}
@@ -491,7 +517,6 @@ export default function ProductsPage() {
                 <th>Karat</th>
                 <th>Diamond Shape</th>
                 <th>Diamond Carats (crt)</th>
-                <th>Diamond Color</th>
                 <th>Current Shopify</th>
                 <th>Calculated Price</th>
                 <th>Status</th>
@@ -569,8 +594,8 @@ export default function ProductsPage() {
                         </select>
                       </td>
 
-                      {/* Product Diamond Price Input (colSpan=3 spans shape, carat, color) */}
-                      <td colSpan={3}>
+                      {/* Product Diamond Price Input (colSpan=2 spans shape, carat) */}
+                      <td colSpan={2}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Diamond Price fallback:</span>
                           <input
@@ -732,33 +757,26 @@ export default function ProductsPage() {
                             />
                           </td>
 
-                          {/* Diamond Color select */}
-                          <td>
-                            <select
-                              className="form-input form-select"
-                              style={{ width: '85px', padding: '0.3rem 1.25rem 0.3rem 0.4rem', fontSize: '0.85rem' }}
-                              value={vEdits.color}
-                              onChange={(e) => handleVariantMetafieldChange(variant.id, 'color', e.target.value)}
-                            >
-                              <option value="">None (G-H)</option>
-                              <option value="D">D</option>
-                              <option value="E-F">E-F</option>
-                              <option value="G-H">G-H</option>
-                            </select>
-                          </td>
-
                           {/* Column 7: Current Price */}
-                          <td style={{ fontSize: '0.85rem' }}>
-                            {currency} {parseFloat(variant.price).toFixed(2)}
+                          <td style={{ fontSize: '0.8rem' }}>
+                            <div>{currency} {parseFloat(variant.price).toFixed(2)}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              {variant.compareAtPrice ? `Compare: ${currency} ${parseFloat(variant.compareAtPrice).toFixed(2)}` : 'Compare: None'}
+                            </div>
                           </td>
 
                           {/* Column 8: Target Calculated Price */}
                           <td>
                             {variant.isGoldVariant && variant.calculatedPrice !== null ? (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                <span className="gold-text-gradient" style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
-                                  {currency} {variant.calculatedPrice.toFixed(2)}
-                                </span>
+                                <div>
+                                  <div className="gold-text-gradient" style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                    {currency} {variant.calculatedPrice.toFixed(2)}
+                                  </div>
+                                  <div style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 500 }}>
+                                    Compare: {currency} {(variant.calculatedPrice * 2).toFixed(2)} (50% OFF)
+                                  </div>
+                                </div>
                                 
                                 {/* Breakdown Tooltip */}
                                 {variant.priceBreakdown && (

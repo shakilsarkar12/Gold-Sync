@@ -6,15 +6,16 @@ export const maxDuration = 300; // Allow Vercel up to 5 minutes to complete the 
 
 export async function POST() {
   try {
-    // Prevent overlapping syncs
+    // Prevent overlapping syncs unless previous sync is stale (> 3 minutes)
     const currentStatus = await getSyncStatus();
-    if (currentStatus.syncing) {
-      return NextResponse.json({ message: 'Sync already in progress.' }, { status: 200 });
+    if (currentStatus && currentStatus.syncing) {
+      const elapsedMs = currentStatus.startedAt ? (Date.now() - new Date(currentStatus.startedAt).getTime()) : 0;
+      if (elapsedMs < 3 * 60 * 1000 && !currentStatus.bulkOperationId) {
+        return NextResponse.json({ message: 'Sync already in progress.' }, { status: 200 });
+      }
     }
 
     // Run sync in background (don't await — return immediately so UI doesn't block)
-    // On Vercel, returning early normally kills the function, but since this is Node.js runtime
-    // the promise will keep executing until maxDuration is reached or it finishes.
     runProductSync(false).catch((err) => {
       console.error('[Sync Now] Background sync failed:', err);
     });

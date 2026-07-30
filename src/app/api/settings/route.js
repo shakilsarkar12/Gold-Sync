@@ -39,37 +39,29 @@ export async function POST(request) {
     let responseMessage = 'Settings saved successfully';
 
     if (makingChargeChanged) {
-      try {
-        console.log('[Settings] Making charge per gram changed, updating product metafields...');
-        
-        // Dynamic import to avoid circular dependencies if any
-        const { fetchShopifyProducts, updateProductMakingChargeMetafields } = await import('@/lib/shopify');
-        const { addLog } = await import('@/lib/db');
-        
-        const products = await fetchShopifyProducts(null, true);
-        await updateProductMakingChargeMetafields(products, updated.makingChargePerGram);
-        
-        const logMsg = `Making Charge updated to ${updated.makingChargePerGram}. Synced ${products.length} products' metafields.`;
-        console.log(`[Settings] ${logMsg}`);
-        
-        await addLog({
-          status: 'success',
-          type: 'settings',
-          details: logMsg,
-          productsUpdated: products.length
-        });
-
-        responseMessage = `Settings saved. Metafields updated for ${products.length} products.`;
-      } catch (err) {
-        console.error('[Settings] Failed to update making charge metafields:', err);
-        const { addLog } = await import('@/lib/db');
-        await addLog({
-          status: 'failed',
-          type: 'settings',
-          details: `Failed to sync making charge metafields: ${err.message}`
-        });
-        responseMessage = `Settings saved, but metafield update failed: ${err.message}`;
-      }
+      // Run making charge metafield update in background so settings POST returns immediately (<100ms)
+      (async () => {
+        try {
+          console.log('[Settings] Making charge per gram changed, updating product metafields in background...');
+          const { fetchShopifyProducts, updateProductMakingChargeMetafields } = await import('@/lib/shopify');
+          const { addLog } = await import('@/lib/db');
+          
+          const products = await fetchShopifyProducts(null, true);
+          await updateProductMakingChargeMetafields(products, updated.makingChargePerGram);
+          
+          const logMsg = `Making Charge updated to ${updated.makingChargePerGram}. Synced ${products.length} products' metafields.`;
+          console.log(`[Settings] ${logMsg}`);
+          
+          await addLog({
+            status: 'success',
+            type: 'settings',
+            details: logMsg,
+            productsUpdated: products.length
+          });
+        } catch (err) {
+          console.error('[Settings] Failed to update making charge metafields in background:', err);
+        }
+      })();
     }
 
     // Do not send shopify tokens to frontend at all

@@ -186,6 +186,10 @@ h6 {
   overflow: hidden;
 }
 
+a {
+  text-decoration: none !important;
+}
+
 .nav-link:hover {
   background-color: rgba(212, 175, 55, 0.06);
   color: var(--gold-light);
@@ -269,10 +273,7 @@ h6 {
 }
 
 .glass-card:hover {
-  background: var(--bg-card-hover);
   border-color: var(--border-hover);
-  box-shadow: var(--gold-glow), 0 10px 40px rgba(0, 0, 0, 0.5);
-  transform: translateY(-2px);
 }
 
 .card-title {

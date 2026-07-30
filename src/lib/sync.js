@@ -53,11 +53,11 @@ export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, ra
   // Making charges: (weight * perGram) + fixed
   const makingCharges = ((parseFloat(weight) || 0) * (parseFloat(appSettings.makingChargePerGram) || 0)) + (parseFloat(appSettings.makingChargeFixed) || 0);
   
-  // Calculate diamond price dynamically if shape and crt are provided
+  // Calculate gemstone price dynamically if Gemstone Quality (color) and carats (crt) are provided
   let calculatedDiamondPrice = 0;
-  if (shape && crt && parseFloat(crt) > 0) {
-    const cleanShape = shape.trim().toLowerCase();
-    const cleanColor = (color || 'G-H').trim().toUpperCase();
+  if (color && crt && parseFloat(crt) > 0) {
+    const cleanShape = (shape || 'round').trim().toLowerCase();
+    const cleanColor = color.trim().toUpperCase();
     
     // Fallback default matrix if appSettings doesn't have it
     const defaultDiamondPrices = {
@@ -76,20 +76,26 @@ export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, ra
     };
     
     const prices = appSettings.diamondPrices || defaultDiamondPrices;
-    const shapePrices = prices[cleanShape];
+    const shapePrices = prices[cleanShape] || prices['round'];
     if (shapePrices) {
-      let colorKey = 'gh';
-      if (cleanColor === 'D') colorKey = 'd';
-      else if (['E', 'F', 'E-F', 'EF'].includes(cleanColor)) colorKey = 'ef';
-      else if (['G', 'H', 'G-H', 'GH'].includes(cleanColor)) colorKey = 'gh';
+      let colorKey = null;
+      if (cleanColor === 'D' || cleanColor.includes('D')) {
+        colorKey = 'd';
+      } else if (cleanColor === 'E-F' || cleanColor === 'EF' || cleanColor.includes('E') || cleanColor.includes('F')) {
+        colorKey = 'ef';
+      } else if (cleanColor === 'G-H' || cleanColor === 'GH' || cleanColor.includes('G') || cleanColor.includes('H')) {
+        colorKey = 'gh';
+      }
       
-      const pricePerCrt = parseFloat(shapePrices[colorKey]) || 0;
-      calculatedDiamondPrice = parseFloat(crt) * pricePerCrt;
-    } else {
-      calculatedDiamondPrice = parseFloat(dPrice) || 0;
+      if (colorKey && shapePrices[colorKey]) {
+        const pricePerCrt = parseFloat(shapePrices[colorKey]) || 0;
+        calculatedDiamondPrice = parseFloat(crt) * pricePerCrt;
+      }
     }
-  } else {
+  } else if (color && parseFloat(dPrice) > 0) {
     calculatedDiamondPrice = parseFloat(dPrice) || 0;
+  } else {
+    calculatedDiamondPrice = 0;
   }
 
   // Subtotal (including diamond price)
@@ -104,11 +110,13 @@ export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, ra
   // GST calculation
   const gstAmount = priceBeforeTax * ((parseFloat(appSettings.gstPercentage) || 0) / 100);
 
-  // Final Price
+  // Final Price and Compare At Price (2x finalPrice = 50% discount)
   const finalPrice = priceBeforeTax + gstAmount;
+  const compareAtPrice = finalPrice * 2;
   
   return {
     finalPrice: Number(finalPrice.toFixed(2)),
+    compareAtPrice: Number(compareAtPrice.toFixed(2)),
     breakdown: {
       goldPricePerGram: Number(goldPricePerGram.toFixed(4)),
       baseGoldCost: Number(baseGoldCost.toFixed(2)),
@@ -124,260 +132,277 @@ export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, ra
 }
 
 export async function runProductSync(isAuto = false) {
-  const settings = await getSettings();
-  
-  if (!settings.shopifyShop) {
-    throw new Error('Shopify Store URL is not configured.');
-  }
-
-  // Mark sync as running in DB so the frontend can poll and show the banner
-  await setSyncStatus({ 
-    syncing: true, 
-    startedAt: new Date().toISOString(), 
-    lastResult: null, 
-    isAuto,
-    totalItems: 0,
-    completedItems: 0
-  });
-  // If Auto Sync, force fetch (true). If Manual Sync, check cache duration (false, true).
-  const rates = await fetchLiveGoldRates(isAuto, !isAuto);
-  
-  // 2. Fetch all products from Shopify (bypass cache)
-  const products = await fetchShopifyProducts(null, true);
-  
-  // 3. Find out-of-sync items
-  const outOfSyncItems = [];
-  const allGoldBreakdowns = []; // for breakdown metafields — collected for ALL gold variants
-  
-  for (const product of products) {
-    const hasGoldVariant = product.variants.some(v => v.weightValue !== null && v.weightValue > 0);
-    const isProductGold = product.weightValue !== null && product.weightValue > 0;
-    if (!isProductGold && !hasGoldVariant) continue;
+  try {
+    const settings = await getSettings();
     
-    for (const variant of product.variants) {
-      const vWeight = variant.weightValue !== null ? variant.weightValue : product.weightValue;
-      const vKarat = variant.karatValue !== null ? variant.karatValue : product.karatValue;
+    if (!settings.shopifyShop) {
+      throw new Error('Shopify Store URL is not configured.');
+    }
+
+    // Mark sync as running in DB so the frontend can poll and show the banner
+    await setSyncStatus({ 
+      syncing: true, 
+      startedAt: new Date().toISOString(), 
+      lastResult: null, 
+      isAuto,
+      totalItems: 0,
+      completedItems: 0
+    });
+    // If Auto Sync, force fetch (true). If Manual Sync, check cache duration (false, true).
+    const rates = await fetchLiveGoldRates(isAuto, !isAuto);
+    
+    // 2. Fetch all products from Shopify (bypass cache)
+    const products = await fetchShopifyProducts(null, true);
+    
+    // 3. Find out-of-sync items
+    const outOfSyncItems = [];
+    const allGoldBreakdowns = []; // for breakdown metafields — collected for ALL gold variants
+    
+    for (const product of products) {
+      const hasGoldVariant = product.variants.some(v => v.weightValue !== null && v.weightValue > 0);
+      const isProductGold = product.weightValue !== null && product.weightValue > 0;
+      if (!isProductGold && !hasGoldVariant) continue;
       
-      const isGold = vWeight !== null && vWeight > 0;
-      if (!isGold) continue;
+      for (const variant of product.variants) {
+        const vWeight = variant.weightValue !== null ? variant.weightValue : product.weightValue;
+        const vKarat = variant.karatValue !== null ? variant.karatValue : product.karatValue;
+        
+        const isGold = vWeight !== null && vWeight > 0;
+        if (!isGold) continue;
 
-      const { finalPrice, breakdown } = calculateVariantPrice({
-        weight: vWeight,
-        karatStr: vKarat,
-        diamondPrice: product.diamondPrice,
-        diamondShape: variant.shapeValue,
-        diamondCrt: variant.crtValue,
-        diamondColor: variant.colorValue,
-        rates,
-        settings,
-        variantTitle: variant.title
-      });
+        const { finalPrice, compareAtPrice, breakdown } = calculateVariantPrice({
+          weight: vWeight,
+          karatStr: vKarat,
+          diamondPrice: product.diamondPrice,
+          diamondShape: variant.shapeValue,
+          diamondCrt: variant.crtValue,
+          diamondColor: variant.colorValue,
+          rates,
+          settings,
+          variantTitle: variant.title
+        });
 
-      // Compute small diamond value
-      const sdWeight = variant.smallDiamondWeight;
-      const sdPricePerCarat = parseFloat(settings.smallDiamondPricePerCarat) || 0;
-      const smallDiamondValue = (sdWeight != null && sdWeight > 0 && sdPricePerCarat > 0)
-        ? Number((sdWeight * sdPricePerCarat).toFixed(2))
-        : 0;
+        // Compute small diamond value
+        const sdWeight = variant.smallDiamondWeight;
+        const sdPricePerCarat = parseFloat(settings.smallDiamondPricePerCarat) || 0;
+        const smallDiamondValue = (sdWeight != null && sdWeight > 0 && sdPricePerCarat > 0)
+          ? Number((sdWeight * sdPricePerCarat).toFixed(2))
+          : 0;
 
-      // Collect breakdown for ALL gold variants (written regardless of price diff)
-      allGoldBreakdowns.push({
-        variantId: variant.id,
-        breakdown: {
-          goldRatePerGram:    breakdown.goldPricePerGram,
-          totalGoldValue:     breakdown.baseGoldCost,
-          centreStoneValue:   breakdown.diamondPrice,
-          smallDiamondValue,
-          makingChargeRate:   parseFloat(settings.makingChargePerGram) || 0,
-          totalMakingCharge:  breakdown.makingCharges,
+        // Collect breakdown for ALL gold variants (written regardless of price diff)
+        allGoldBreakdowns.push({
+          variantId: variant.id,
+          breakdown: {
+            goldRatePerGram:    breakdown.goldPricePerGram,
+            totalGoldValue:     breakdown.baseGoldCost,
+            centreStoneValue:   breakdown.diamondPrice,
+            smallDiamondValue,
+            makingChargeRate:   parseFloat(settings.makingChargePerGram) || 0,
+            totalMakingCharge:  breakdown.makingCharges,
+          },
+        });
+        
+        const priceDiff = Math.abs(parseFloat(variant.price) - finalPrice);
+        const currentCompareAt = parseFloat(variant.compareAtPrice) || 0;
+        const compareDiff = Math.abs(currentCompareAt - compareAtPrice);
+
+        if (priceDiff > 0.05 || compareDiff > 0.05) {
+          outOfSyncItems.push({
+            productId: product.id,
+            productTitle: product.title,
+            variantId: variant.id,
+            variantTitle: variant.title,
+            newPrice: finalPrice,
+            compareAtPrice: compareAtPrice,
+            oldPrice: variant.price,
+            // Store current metafield values to push during sync
+            metafields: {
+              weight: variant.weightValue,
+              karat: variant.karatValue,
+              shape: variant.shapeValue,
+              crt: variant.crtValue,
+              color: variant.colorValue,
+            },
+          });
+        }
+      }
+    }
+    
+    // ── Write Metafields Unconditionally ──
+    // We write these even if prices haven't changed, and we must write them before returning
+    // early in any path (like 0 changes or >= 250 bulk changes).
+    await updateProductGoldRateMetafields(products, rates, settings).catch((err) => {
+      console.warn('[Sync] Gold rate metafield update skipped:', err.message);
+    });
+    await updateVariantBreakdownMetafields(allGoldBreakdowns, settings).catch((err) => {
+      console.warn('[Sync] Breakdown metafield update skipped:', err.message);
+    });
+
+    if (outOfSyncItems.length === 0) {
+      // Mark sync as complete with 0 count
+      await setSyncStatus({
+        syncing: false,
+        completedAt: new Date().toISOString(),
+        lastResult: {
+          success: true,
+          successCount: 0,
+          failCount: 0,
+          isAuto,
         },
       });
+      return { success: true, successCount: 0, failCount: 0, errors: [] };
+    }
+    
+    // Update total items
+    await setSyncStatus({
+      syncing: true,
+      isAuto,
+      totalItems: outOfSyncItems.length,
+      completedItems: 0
+    });
+
+    // 4. Update Shopify variant prices in bulk
+    let successCount = 0;
+    let failCount = 0;
+    const errors = [];
+    
+    // Group outOfSyncItems by productId
+    const groupedByProduct = {};
+    for (const item of outOfSyncItems) {
+      if (!groupedByProduct[item.productId]) {
+        groupedByProduct[item.productId] = [];
+      }
+      groupedByProduct[item.productId].push(item);
+    }
+
+    const productIds = Object.keys(groupedByProduct);
+
+    // Update variant metafields for all out-of-sync items before updating prices
+    const allMetafieldsData = [];
+    for (const item of outOfSyncItems) {
+      if (item.metafields) {
+        const mf = item.metafields;
+        const hasAnyMetafield = mf.weight !== null || mf.karat !== null ||
+          mf.shape !== null || mf.crt !== null || mf.color !== null;
+        if (hasAnyMetafield) {
+          allMetafieldsData.push({
+            variantId: item.variantId,
+            weight: mf.weight !== null ? mf.weight : null,
+            karat: mf.karat || null,
+            shape: mf.shape || null,
+            crt: mf.crt !== null ? mf.crt : null,
+            color: mf.color || null,
+          });
+        }
+      }
+    }
+    
+    if (allMetafieldsData.length > 0) {
+      await updateShopifyVariantMetafieldsBulk(allMetafieldsData).catch(err => {
+        console.warn('[Sync] Variant metafields update failed:', err.message);
+      });
+    }
+
+    if (outOfSyncItems.length >= 250) {
+      try {
+        let jsonlString = '';
+        for (const pid of productIds) {
+          const items = groupedByProduct[pid];
+          const variants = items.map(item => ({ id: item.variantId, price: item.newPrice.toString() }));
+          jsonlString += JSON.stringify({ productId: pid, variants }) + '\n';
+        }
+
+        const { runBulkProductVariantsUpdate } = await import('./shopify');
+        const bulkOperationId = await runBulkProductVariantsUpdate(jsonlString);
+
+        await setSyncStatus({
+          syncing: true,
+          isAuto,
+          totalItems: outOfSyncItems.length,
+          completedItems: 0,
+          bulkOperationId,
+        });
+
+        // Skip the synchronous loop below
+        return { success: true, bulkOperationId, isAuto };
+      } catch (error) {
+        console.error("Bulk sync error:", error);
+        await setSyncStatus({ syncing: false, lastResult: { success: false, error: error.message } });
+        return { success: false, error: error.message };
+      }
+    }
+    
+    for (let i = 0; i < productIds.length; i++) {
+      const pid = productIds[i];
+      const items = groupedByProduct[pid];
       
-      const diff = Math.abs(parseFloat(variant.price) - finalPrice);
-      if (diff > 0.05) {
-        outOfSyncItems.push({
-          productId: product.id,
-          productTitle: product.title,
-          variantId: variant.id,
-          variantTitle: variant.title,
-          newPrice: finalPrice,
-          oldPrice: variant.price,
-          // Store current metafield values to push during sync
-          metafields: {
-            weight: variant.weightValue,
-            karat: variant.karatValue,
-            shape: variant.shapeValue,
-            crt: variant.crtValue,
-            color: variant.colorValue,
-          },
+      try {
+        const priceUpdates = items.map(item => ({
+          id: item.variantId,
+          price: item.newPrice.toString()
+        }));
+        
+        await updateShopifyVariantPricesBulk(pid, priceUpdates);
+        successCount += items.length;
+      } catch (error) {
+        failCount += items.length;
+        errors.push(`Failed product ${pid}: ${error.message}`);
+      }
+      
+      // Update progress periodically
+      if ((i + 1) % 5 === 0 || i === productIds.length - 1) {
+        await setSyncStatus({
+          syncing: true,
+          isAuto,
+          totalItems: outOfSyncItems.length,
+          completedItems: successCount + failCount,
         });
       }
     }
-  }
-  
-  // ── Write Metafields Unconditionally ──
-  // We write these even if prices haven't changed, and we must write them before returning
-  // early in any path (like 0 changes or >= 250 bulk changes).
-  await updateProductGoldRateMetafields(products, rates, settings).catch((err) => {
-    console.warn('[Sync] Gold rate metafield update skipped:', err.message);
-  });
-  await updateVariantBreakdownMetafields(allGoldBreakdowns, settings).catch((err) => {
-    console.warn('[Sync] Breakdown metafield update skipped:', err.message);
-  });
+    
+    // 5. Add log entry
+    const prefix = isAuto ? 'Auto Sync' : 'Bulk Sync';
+    if (successCount > 0 || failCount > 0) {
+      await addLog({
+        status: failCount > 0 ? 'failed' : 'success',
+        type: 'bulk',
+        details: `${prefix}: successfully updated ${successCount} variant prices.${
+          failCount > 0 ? ` Failed ${failCount} variants.` : ''
+        }`,
+        productsUpdated: successCount,
+      });
+    }
 
-  if (outOfSyncItems.length === 0) {
-    // Mark sync as complete with 0 count
+    const syncResult = {
+      success: failCount === 0,
+      successCount,
+      failCount,
+      errors,
+    };
+
+    // Mark sync as complete in DB with result info
     await setSyncStatus({
       syncing: false,
       completedAt: new Date().toISOString(),
       lastResult: {
-        success: true,
-        successCount: 0,
-        failCount: 0,
+        success: syncResult.success,
+        successCount,
+        failCount,
         isAuto,
       },
     });
-    return { success: true, successCount: 0, failCount: 0, errors: [] };
-  }
-  
-  // Update total items
-  await setSyncStatus({
-    syncing: true,
-    isAuto,
-    totalItems: outOfSyncItems.length,
-    completedItems: 0
-  });
 
-  // 4. Update Shopify variant prices in bulk
-  let successCount = 0;
-  let failCount = 0;
-  const errors = [];
-  
-  // Group outOfSyncItems by productId
-  const groupedByProduct = {};
-  for (const item of outOfSyncItems) {
-    if (!groupedByProduct[item.productId]) {
-      groupedByProduct[item.productId] = [];
-    }
-    groupedByProduct[item.productId].push(item);
-  }
-
-  const productIds = Object.keys(groupedByProduct);
-
-  // Update variant metafields for all out-of-sync items before updating prices
-  const allMetafieldsData = [];
-  for (const item of outOfSyncItems) {
-    if (item.metafields) {
-      const mf = item.metafields;
-      const hasAnyMetafield = mf.weight !== null || mf.karat !== null ||
-        mf.shape !== null || mf.crt !== null || mf.color !== null;
-      if (hasAnyMetafield) {
-        allMetafieldsData.push({
-          variantId: item.variantId,
-          weight: mf.weight !== null ? mf.weight : null,
-          karat: mf.karat || null,
-          shape: mf.shape || null,
-          crt: mf.crt !== null ? mf.crt : null,
-          color: mf.color || null,
-        });
-      }
-    }
-  }
-  
-  if (allMetafieldsData.length > 0) {
-    await updateShopifyVariantMetafieldsBulk(allMetafieldsData).catch(err => {
-      console.warn('[Sync] Variant metafields update failed:', err.message);
+    return syncResult;
+  } catch (err) {
+    console.error('[runProductSync] Unhandled Error:', err);
+    await setSyncStatus({
+      syncing: false,
+      completedAt: new Date().toISOString(),
+      lastResult: {
+        success: false,
+        error: err.message,
+      },
     });
+    return { success: false, error: err.message };
   }
-
-  if (outOfSyncItems.length >= 250) {
-    try {
-      let jsonlString = '';
-      for (const pid of productIds) {
-        const items = groupedByProduct[pid];
-        const variants = items.map(item => ({ id: item.variantId, price: item.newPrice.toString() }));
-        jsonlString += JSON.stringify({ productId: pid, variants }) + '\n';
-      }
-
-      const { runBulkProductVariantsUpdate } = await import('./shopify');
-      const bulkOperationId = await runBulkProductVariantsUpdate(jsonlString);
-
-      await setSyncStatus({
-        syncing: true,
-        isAuto,
-        totalItems: outOfSyncItems.length,
-        completedItems: 0,
-        bulkOperationId,
-      });
-
-      // Skip the synchronous loop below
-      return { success: true, bulkOperationId, isAuto };
-    } catch (error) {
-      console.error("Bulk sync error:", error);
-      await setSyncStatus({ syncing: false, lastResult: { success: false, error: error.message } });
-      return { success: false, error: error.message };
-    }
-  }
-  
-  for (let i = 0; i < productIds.length; i++) {
-    const pid = productIds[i];
-    const items = groupedByProduct[pid];
-    
-    try {
-      const priceUpdates = items.map(item => ({
-        id: item.variantId,
-        price: item.newPrice.toString()
-      }));
-      
-      await updateShopifyVariantPricesBulk(pid, priceUpdates);
-      successCount += items.length;
-    } catch (error) {
-      failCount += items.length;
-      errors.push(`Failed product ${pid}: ${error.message}`);
-    }
-    
-    // Update progress periodically
-    if ((i + 1) % 5 === 0 || i === productIds.length - 1) {
-      await setSyncStatus({
-        syncing: true,
-        isAuto,
-        totalItems: outOfSyncItems.length,
-        completedItems: successCount + failCount,
-      });
-    }
-  }
-  
-  // 5. Add log entry
-  const prefix = isAuto ? 'Auto Sync' : 'Bulk Sync';
-  if (successCount > 0 || failCount > 0) {
-    await addLog({
-      status: failCount > 0 ? 'failed' : 'success',
-      type: 'bulk',
-      details: `${prefix}: successfully updated ${successCount} variant prices.${
-        failCount > 0 ? ` Failed ${failCount} variants.` : ''
-      }`,
-      productsUpdated: successCount,
-    });
-  }
-
-  const syncResult = {
-    success: failCount === 0,
-    successCount,
-    failCount,
-    errors,
-  };
-
-  // Mark sync as complete in DB with result info
-  await setSyncStatus({
-    syncing: false,
-    completedAt: new Date().toISOString(),
-    lastResult: {
-      success: syncResult.success,
-      successCount,
-      failCount,
-      isAuto,
-    },
-  });
-
-  return syncResult;
 }
