@@ -1336,17 +1336,45 @@ export async function updateDiamondPriceMetafields(products, settings) {
   const ghNs  = (settings.ghPricePerCtNamespace || 'custom').trim();
   const ghKey = (settings.ghPricePerCtKey || 'g_h_price').trim();
 
-  const mutation = `
-    mutation UpdateDiamondPriceMetafields($metafields: [MetafieldsSetInput!]!) {
-      metafieldsSet(metafields: $metafields) {
-        metafields { id namespace key value }
-        userErrors { field message }
+  // Try bulk JSONL productUpdate mutation first if 50+ products
+  if (products.length >= 50) {
+    try {
+      let jsonlString = '';
+      for (const product of products) {
+        let primaryShape = 'round';
+        if (product.variants && product.variants.length > 0) {
+          const foundVar = product.variants.find(v => v.shapeValue);
+          if (foundVar && foundVar.shapeValue) {
+            primaryShape = foundVar.shapeValue.trim().toLowerCase();
+          }
+        }
+
+        const prodPrices = matrix[primaryShape] || matrix['round'] || { d: 34999, ef: 31999, gh: 29999 };
+        const prodD  = Math.round(parseFloat(prodPrices.d)  || 34999);
+        const prodEF = Math.round(parseFloat(prodPrices.ef) || 31999);
+        const prodGH = Math.round(parseFloat(prodPrices.gh) || 29999);
+
+        const input = {
+          id: product.id,
+          metafields: [
+            { namespace: dNs,  key: dKey,  value: String(prodD),  type: 'number_integer' },
+            { namespace: efNs, key: efKey, value: String(prodEF), type: 'number_integer' },
+            { namespace: ghNs, key: ghKey, value: String(prodGH), type: 'number_integer' },
+          ],
+        };
+        jsonlString += JSON.stringify({ input }) + '\n';
       }
+
+      const bulkOperationId = await runBulkProductMetafieldsUpdate(jsonlString);
+      console.log(`[DiamondPrice MF] Triggered JSONL Bulk Mutation (ID: ${bulkOperationId}) for ${products.length} products.`);
+      return { success: true, bulkOperationId };
+    } catch (err) {
+      console.warn('[DiamondPrice MF] Bulk JSONL productUpdate failed, falling back to parallel GraphQL chunks:', err.message);
     }
-  `;
+  }
 
+  // Fallback: Parallel chunked GraphQL metafieldsSet (concurrency = 5)
   let allMetafields = [];
-
   for (const product of products) {
     let primaryShape = 'round';
     if (product.variants && product.variants.length > 0) {
@@ -1361,58 +1389,38 @@ export async function updateDiamondPriceMetafields(products, settings) {
     const prodEF = Math.round(parseFloat(prodPrices.ef) || 31999);
     const prodGH = Math.round(parseFloat(prodPrices.gh) || 29999);
 
-    // Product level
     allMetafields.push(
       { ownerId: product.id, namespace: dNs,  key: dKey,  value: String(prodD),  type: 'number_integer' },
       { ownerId: product.id, namespace: efNs, key: efKey, value: String(prodEF), type: 'number_integer' },
       { ownerId: product.id, namespace: ghNs, key: ghKey, value: String(prodGH), type: 'number_integer' }
     );
-
-    // Variant level
-    if (product.variants && product.variants.length > 0) {
-      for (const variant of product.variants) {
-        const vShape = (variant.shapeValue || primaryShape).trim().toLowerCase();
-        const vPrices = matrix[vShape] || prodPrices;
-        const vD  = Math.round(parseFloat(vPrices.d)  || prodD);
-        const vEF = Math.round(parseFloat(vPrices.ef) || prodEF);
-        const vGH = Math.round(parseFloat(vPrices.gh) || prodGH);
-
-        allMetafields.push(
-          { ownerId: variant.id, namespace: dNs,  key: dKey,  value: String(vD),  type: 'number_integer' },
-          { ownerId: variant.id, namespace: efNs, key: efKey, value: String(vEF), type: 'number_integer' },
-          { ownerId: variant.id, namespace: ghNs, key: ghKey, value: String(vGH), type: 'number_integer' }
-        );
-      }
-    }
   }
 
   if (allMetafields.length === 0) return true;
 
-  if (allMetafields.length >= 50) {
-    try {
-      let jsonlString = '';
-      for (let i = 0; i < allMetafields.length; i += 25) {
-        const chunk = allMetafields.slice(i, i + 25);
-        jsonlString += JSON.stringify({ metafields: chunk }) + '\n';
+  const mutation = `
+    mutation UpdateDiamondPriceMetafields($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { id namespace key value }
+        userErrors { field message }
       }
-
-      const bulkOperationId = await runBulkMetafieldsSet(jsonlString);
-      console.log(`[DiamondPrice MF] Triggered JSONL Bulk Mutation (ID: ${bulkOperationId}) for ${allMetafields.length} metafields across ${products.length} products.`);
-      return { success: true, bulkOperationId };
-    } catch (err) {
-      console.warn('[DiamondPrice MF] Bulk JSONL failed, falling back to chunked GraphQL:', err.message);
     }
-  }
+  `;
 
   const CHUNK_SIZE = 25;
+  const CONCURRENCY = 5;
+  const chunks = [];
   for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
-    const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
-    const response = await shopifyGraphQL(mutation, { metafields: chunk });
-    const errors = response.metafieldsSet?.userErrors || [];
-    if (errors.length > 0) {
-      console.warn('[DiamondPrice MF] Metafields Set Warning:', errors.map(e => e.message).join(', '));
-    }
-    await sleep(200);
+    chunks.push(allMetafields.slice(i, i + CHUNK_SIZE));
+  }
+
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    const batch = chunks.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(chunk =>
+      shopifyGraphQL(mutation, { metafields: chunk }).catch(e => {
+        console.warn('[DiamondPrice MF] Parallel chunk warning:', e.message);
+      })
+    ));
   }
 
   console.log(`[DiamondPrice MF] Updated d_price, e_f_price, g_h_price integer metafields for ${products.length} products.`);
@@ -1420,14 +1428,14 @@ export async function updateDiamondPriceMetafields(products, settings) {
 }
 
 /**
- * Runs a Shopify Bulk Operation (JSONL) for setting metafields in bulk via GraphQL.
+ * Runs a Shopify Bulk Operation (JSONL) for setting product metafields via productUpdate GraphQL mutation.
  */
-export async function runBulkMetafieldsSet(jsonlString) {
+export async function runBulkProductMetafieldsUpdate(jsonlString) {
   const stagedQuery = `
     mutation {
       stagedUploadsCreate(input: [{
         resource: BULK_MUTATION_VARIABLES,
-        filename: "bulk_metafields.jsonl",
+        filename: "bulk_product_metafields.jsonl",
         mimeType: "text/jsonl",
         httpMethod: POST
       }]) {
@@ -1455,13 +1463,13 @@ export async function runBulkMetafieldsSet(jsonlString) {
     let val = param.value;
     if (param.name === 'key') {
       if (val.includes('${filename}')) {
-        val = val.replace('${filename}', 'bulk_metafields.jsonl');
+        val = val.replace('${filename}', 'bulk_product_metafields.jsonl');
       }
       uploadedKey = val;
     }
     formData.append(param.name, val);
   }
-  formData.append('file', new Blob([jsonlString], { type: 'text/jsonl' }), 'bulk_metafields.jsonl');
+  formData.append('file', new Blob([jsonlString], { type: 'text/jsonl' }), 'bulk_product_metafields.jsonl');
 
   const uploadRes = await fetch(target.url, {
     method: 'POST',
@@ -1486,7 +1494,7 @@ export async function runBulkMetafieldsSet(jsonlString) {
   const bulkMutation = `
     mutation bulkOperationRunMutation($stagedUploadPath: String!) {
       bulkOperationRunMutation(
-        mutation: "mutation($metafields: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $metafields) { userErrors { message } } }",
+        mutation: "mutation($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }",
         stagedUploadPath: $stagedUploadPath
       ) {
         bulkOperation {
@@ -1505,7 +1513,7 @@ export async function runBulkMetafieldsSet(jsonlString) {
   const userErrs = bulkData.bulkOperationRunMutation?.userErrors;
 
   if (userErrs && userErrs.length > 0) {
-    throw new Error(`Bulk Metafields Trigger Error: ${userErrs.map(e => e.message).join(', ')}`);
+    throw new Error(`Bulk Product Metafields Trigger Error: ${userErrs.map(e => e.message).join(', ')}`);
   }
 
   return bulkOp.id;
