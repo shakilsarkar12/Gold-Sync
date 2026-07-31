@@ -447,6 +447,21 @@ export async function setProductsCache(products) {
   }
 }
 
+export async function clearProductsCache() {
+  const pool = await getMysqlPool();
+  if (pool) {
+    return await setDoc('products_cache', 'cache', { products: [], timestamp: 0 });
+  }
+  const cachePath = path.join(DATA_DIR, 'products_cache.json');
+  await ensureDirectory();
+  try {
+    await fs.writeFile(cachePath, JSON.stringify({ products: [], timestamp: 0 }), 'utf-8');
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 export async function getSavedGoldRates() {
   const pool = await getMysqlPool();
   if (pool) {

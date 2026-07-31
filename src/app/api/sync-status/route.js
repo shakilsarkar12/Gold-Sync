@@ -51,6 +51,10 @@ export async function GET() {
               details: `Bulk Operation ${success ? 'completed successfully' : 'failed'} for ${status.totalItems || 'many'} variants.`,
               productsUpdated: successCount,
             });
+
+            // Invalidate local cached product prices so UI fetches fresh Shopify prices
+            const { clearProductsCache } = await import('@/lib/db');
+            await clearProductsCache().catch(() => {});
             
             // Return the new finished state
             const updatedStatus = await getSyncStatus();
