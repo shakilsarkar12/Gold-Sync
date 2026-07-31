@@ -1,6 +1,6 @@
 import { getSettings, addLog, setSyncStatus } from './db';
 import { fetchLiveGoldRates } from './goldapi';
-import { fetchShopifyProducts, updateShopifyVariantPricesBulk, updateShopifyVariantMetafieldsBulk, updateProductGoldRateMetafields, updateVariantBreakdownMetafields } from './shopify';
+import { fetchShopifyProducts, updateShopifyVariantPricesBulk, updateShopifyVariantMetafieldsBulk, updateProductGoldRateMetafields, updateVariantBreakdownMetafields, updateDiamondPriceMetafields } from './shopify';
 
 
 // Helper to calculate pricing based on weight, karat, diamond price, rates, and settings
@@ -218,7 +218,6 @@ export async function runProductSync(isAuto = false) {
             newPrice: finalPrice,
             compareAtPrice: compareAtPrice,
             oldPrice: variant.price,
-            // Store current metafield values to push during sync
             metafields: {
               weight: variant.weightValue,
               karat: variant.karatValue,
@@ -231,32 +230,23 @@ export async function runProductSync(isAuto = false) {
       }
     }
     
-    // ── Write Metafields Unconditionally ──
-    // We write these even if prices haven't changed, and we must write them before returning
-    // early in any path (like 0 changes or >= 250 bulk changes).
-    await updateProductGoldRateMetafields(products, rates, settings).catch((err) => {
+    // Write Gold rate and breakdown metafields in background (non-blocking for JSONL bulk sync)
+    updateProductGoldRateMetafields(products, rates, settings).catch((err) => {
       console.warn('[Sync] Gold rate metafield update skipped:', err.message);
     });
-    await updateVariantBreakdownMetafields(allGoldBreakdowns, settings).catch((err) => {
+    updateVariantBreakdownMetafields(allGoldBreakdowns, settings).catch((err) => {
       console.warn('[Sync] Breakdown metafield update skipped:', err.message);
     });
 
     if (outOfSyncItems.length === 0) {
-      // Mark sync as complete with 0 count
       await setSyncStatus({
         syncing: false,
         completedAt: new Date().toISOString(),
-        lastResult: {
-          success: true,
-          successCount: 0,
-          failCount: 0,
-          isAuto,
-        },
+        lastResult: { success: true, successCount: 0, failCount: 0, isAuto },
       });
       return { success: true, successCount: 0, failCount: 0, errors: [] };
     }
-    
-    // Update total items
+
     await setSyncStatus({
       syncing: true,
       isAuto,
@@ -264,7 +254,6 @@ export async function runProductSync(isAuto = false) {
       completedItems: 0
     });
 
-    // 4. Update Shopify variant prices in bulk
     let successCount = 0;
     let failCount = 0;
     const errors = [];
@@ -326,7 +315,6 @@ export async function runProductSync(isAuto = false) {
           bulkOperationId,
         });
 
-        // Skip the synchronous loop below
         return { success: true, bulkOperationId, isAuto };
       } catch (error) {
         console.error("Bulk sync error:", error);
@@ -352,7 +340,6 @@ export async function runProductSync(isAuto = false) {
         errors.push(`Failed product ${pid}: ${error.message}`);
       }
       
-      // Update progress periodically
       if ((i + 1) % 5 === 0 || i === productIds.length - 1) {
         await setSyncStatus({
           syncing: true,
@@ -363,7 +350,6 @@ export async function runProductSync(isAuto = false) {
       }
     }
     
-    // 5. Add log entry
     const prefix = isAuto ? 'Auto Sync' : 'Bulk Sync';
     if (successCount > 0 || failCount > 0) {
       await addLog({
@@ -383,7 +369,6 @@ export async function runProductSync(isAuto = false) {
       errors,
     };
 
-    // Mark sync as complete in DB with result info
     await setSyncStatus({
       syncing: false,
       completedAt: new Date().toISOString(),

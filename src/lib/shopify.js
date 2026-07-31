@@ -1111,11 +1111,7 @@ export async function getCurrentBulkOperation() {
  * @param {Object} settings  - App settings from getSettings
  */
 export async function updateProductGoldRateMetafields(products, rates, settings) {
-  const mf1Enabled = settings.goldRateMetafield1Enabled;
-  const mf2Enabled = settings.goldRateMetafield2Enabled;
-
-  if (!mf1Enabled && !mf2Enabled) return true; // nothing to do
-  if (!products || products.length === 0) return true;
+  if (!products || products.length === 0 || !rates) return true;
 
   const mutation = `
     mutation UpdateProductGoldRateMetafields($metafields: [MetafieldsSetInput!]!) {
@@ -1126,10 +1122,15 @@ export async function updateProductGoldRateMetafields(products, rates, settings)
     }
   `;
 
+  const defaultKarat = settings.defaultKarat || '18K';
+  const defaultWeight = parseFloat(settings.defaultWeight) || 3.5;
+  const rate24k = rates.price_gram_24k || (rates.price ? (rates.price / 31.1035) : 75.50);
+
+  const mf1Enabled = settings.goldRateMetafield1Enabled;
+  const mf2Enabled = settings.goldRateMetafield2Enabled;
   const mf1Ns  = (settings.goldRateMetafield1Namespace || 'custom').trim();
   const mf1Key = (settings.goldRateMetafield1Key || 'gold_rate_24k').trim();
   const mf1Src = settings.goldRateMetafield1Source || 'price_gram_24k';
-
   const mf2Ns  = (settings.goldRateMetafield2Namespace || 'custom').trim();
   const mf2Key = (settings.goldRateMetafield2Key || 'gold_rate_18k').trim();
   const mf2Src = settings.goldRateMetafield2Source || 'price_gram_18k';
@@ -1137,51 +1138,60 @@ export async function updateProductGoldRateMetafields(products, rates, settings)
   const mf1Value = rates[mf1Src] != null ? String(rates[mf1Src]) : null;
   const mf2Value = rates[mf2Src] != null ? String(rates[mf2Src]) : null;
 
-  if (mf1Enabled && !mf1Value) {
-    console.warn(`[GoldRate MF] Source "${mf1Src}" not found in rates — skipping metafield #1`);
-  }
-  if (mf2Enabled && !mf2Value) {
-    console.warn(`[GoldRate MF] Source "${mf2Src}" not found in rates — skipping metafield #2`);
-  }
-
   let allMetafields = [];
 
   for (const product of products) {
+    // 1. Always set custom.gold_rate_per_gram for Product
+    allMetafields.push({
+      ownerId: product.id,
+      namespace: 'custom',
+      key: 'gold_rate_per_gram',
+      value: String(Number(rate24k.toFixed(2))),
+      type: 'number_decimal',
+    });
+
+    // 2. Set custom.gold_karat and custom.gold_weight for Product if available
+    const prodKarat = product.karatValue || defaultKarat;
+    const prodWeight = product.weightValue !== null ? product.weightValue : defaultWeight;
+
+    allMetafields.push({
+      ownerId: product.id,
+      namespace: 'custom',
+      key: 'gold_karat',
+      value: String(prodKarat),
+      type: 'single_line_text_field',
+    });
+
+    allMetafields.push({
+      ownerId: product.id,
+      namespace: 'custom',
+      key: 'gold_weight',
+      value: String(prodWeight),
+      type: 'number_decimal',
+    });
+
     if (mf1Enabled && mf1Value) {
-      allMetafields.push({
-        ownerId: product.id,
-        namespace: mf1Ns,
-        key: mf1Key,
-        value: mf1Value,
-        type: 'number_decimal',
-      });
+      allMetafields.push({ ownerId: product.id, namespace: mf1Ns, key: mf1Key, value: mf1Value, type: 'number_decimal' });
     }
     if (mf2Enabled && mf2Value) {
-      allMetafields.push({
-        ownerId: product.id,
-        namespace: mf2Ns,
-        key: mf2Key,
-        value: mf2Value,
-        type: 'number_decimal',
-      });
+      allMetafields.push({ ownerId: product.id, namespace: mf2Ns, key: mf2Key, value: mf2Value, type: 'number_decimal' });
     }
   }
 
   if (allMetafields.length === 0) return true;
 
-  // Shopify allows max 25 metafields per metafieldsSet call
   const CHUNK_SIZE = 25;
   for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
     const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
     const response = await shopifyGraphQL(mutation, { metafields: chunk });
     const errors = response.metafieldsSet?.userErrors || [];
     if (errors.length > 0) {
-      throw new Error(`Gold Rate Metafields Set Error: ${errors.map((e) => e.message).join(', ')}`);
+      console.warn('[GoldRate MF] Metafields Set warning:', errors.map((e) => e.message).join(', '));
     }
-    await sleep(250);
+    await sleep(200);
   }
 
-  console.log(`[GoldRate MF] Updated gold rate metafields for ${products.length} products.`);
+  console.log(`[GoldRate MF] Updated gold rate, purity, and weight metafields for ${products.length} products.`);
   return true;
 }
 
@@ -1246,4 +1256,257 @@ export async function updateProductMakingChargeMetafields(products, makingCharge
 
   console.log(`[MakingCharge MF] Updated making charge metafields for ${products.length} products.`);
   return true;
+}
+
+/**
+ * Registers BULK_OPERATIONS_FINISH webhook with Shopify
+ */
+export async function registerBulkOperationWebhook(callbackUrl) {
+  const mutation = `
+    mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
+      webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+        userErrors {
+          field
+          message
+        }
+        webhookSubscription {
+          id
+          topic
+          endpoint {
+            ... on WebhookHttpEndpoint {
+              callbackUrl
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    topic: 'BULK_OPERATIONS_FINISH',
+    webhookSubscription: {
+      callbackUrl,
+      format: 'JSON',
+    },
+  };
+
+  const response = await shopifyGraphQL(mutation, variables);
+  const userErrors = response.webhookSubscriptionCreate?.userErrors || [];
+  if (userErrors.length > 0) {
+    throw new Error(`Failed to register Webhook: ${userErrors.map(e => e.message).join(', ')}`);
+  }
+  return response.webhookSubscriptionCreate?.webhookSubscription;
+}
+
+/**
+ * Writes diamond quality per-carat prices (D, E-F, G-H) to integer metafields:
+ *   - custom.d_price (number_integer)
+ *   - custom.e_f_price (number_integer)
+ *   - custom.g_h_price (number_integer)
+ *
+ * @param {Array}  products  - Products array returned by fetchShopifyProducts
+ * @param {Object} settings  - App settings from getSettings
+ */
+export async function updateDiamondPriceMetafields(products, settings) {
+  if (!products || products.length === 0) return true;
+
+  const defaultDiamondPrices = {
+    round: { d: 34999, ef: 31999, gh: 29999 },
+    princess: { d: 34999, ef: 31999, gh: 29999 },
+    cushion: { d: 34999, ef: 31999, gh: 29999 },
+    oval: { d: 34999, ef: 31999, gh: 29999 },
+    emerald: { d: 34999, ef: 31999, gh: 29999 },
+    portuguese: { d: 39999, ef: 36999, gh: 31999 },
+    pear: { d: 34999, ef: 31999, gh: 29999 },
+    asscher: { d: 34999, ef: 31999, gh: 29999 },
+    heart: { d: 34999, ef: 31999, gh: 29999 },
+    radiant: { d: 34999, ef: 31999, gh: 29999 },
+    marquise: { d: 34999, ef: 31999, gh: 29999 },
+    baguette: { d: 34999, ef: 31999, gh: 29999 }
+  };
+
+  const matrix = settings.diamondPrices || defaultDiamondPrices;
+
+  const dNs  = (settings.dPricePerCtNamespace || 'custom').trim();
+  const dKey = (settings.dPricePerCtKey || 'd_price').trim();
+
+  const efNs  = (settings.efPricePerCtNamespace || 'custom').trim();
+  const efKey = (settings.efPricePerCtKey || 'e_f_price').trim();
+
+  const ghNs  = (settings.ghPricePerCtNamespace || 'custom').trim();
+  const ghKey = (settings.ghPricePerCtKey || 'g_h_price').trim();
+
+  const mutation = `
+    mutation UpdateDiamondPriceMetafields($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { id namespace key value }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  let allMetafields = [];
+
+  for (const product of products) {
+    let primaryShape = 'round';
+    if (product.variants && product.variants.length > 0) {
+      const foundVar = product.variants.find(v => v.shapeValue);
+      if (foundVar && foundVar.shapeValue) {
+        primaryShape = foundVar.shapeValue.trim().toLowerCase();
+      }
+    }
+
+    const prodPrices = matrix[primaryShape] || matrix['round'] || { d: 34999, ef: 31999, gh: 29999 };
+    const prodD  = Math.round(parseFloat(prodPrices.d)  || 34999);
+    const prodEF = Math.round(parseFloat(prodPrices.ef) || 31999);
+    const prodGH = Math.round(parseFloat(prodPrices.gh) || 29999);
+
+    // Product level
+    allMetafields.push(
+      { ownerId: product.id, namespace: dNs,  key: dKey,  value: String(prodD),  type: 'number_integer' },
+      { ownerId: product.id, namespace: efNs, key: efKey, value: String(prodEF), type: 'number_integer' },
+      { ownerId: product.id, namespace: ghNs, key: ghKey, value: String(prodGH), type: 'number_integer' }
+    );
+
+    // Variant level
+    if (product.variants && product.variants.length > 0) {
+      for (const variant of product.variants) {
+        const vShape = (variant.shapeValue || primaryShape).trim().toLowerCase();
+        const vPrices = matrix[vShape] || prodPrices;
+        const vD  = Math.round(parseFloat(vPrices.d)  || prodD);
+        const vEF = Math.round(parseFloat(vPrices.ef) || prodEF);
+        const vGH = Math.round(parseFloat(vPrices.gh) || prodGH);
+
+        allMetafields.push(
+          { ownerId: variant.id, namespace: dNs,  key: dKey,  value: String(vD),  type: 'number_integer' },
+          { ownerId: variant.id, namespace: efNs, key: efKey, value: String(vEF), type: 'number_integer' },
+          { ownerId: variant.id, namespace: ghNs, key: ghKey, value: String(vGH), type: 'number_integer' }
+        );
+      }
+    }
+  }
+
+  if (allMetafields.length === 0) return true;
+
+  if (allMetafields.length >= 50) {
+    try {
+      let jsonlString = '';
+      for (let i = 0; i < allMetafields.length; i += 25) {
+        const chunk = allMetafields.slice(i, i + 25);
+        jsonlString += JSON.stringify({ metafields: chunk }) + '\n';
+      }
+
+      const bulkOperationId = await runBulkMetafieldsSet(jsonlString);
+      console.log(`[DiamondPrice MF] Triggered JSONL Bulk Mutation (ID: ${bulkOperationId}) for ${allMetafields.length} metafields across ${products.length} products.`);
+      return { success: true, bulkOperationId };
+    } catch (err) {
+      console.warn('[DiamondPrice MF] Bulk JSONL failed, falling back to chunked GraphQL:', err.message);
+    }
+  }
+
+  const CHUNK_SIZE = 25;
+  for (let i = 0; i < allMetafields.length; i += CHUNK_SIZE) {
+    const chunk = allMetafields.slice(i, i + CHUNK_SIZE);
+    const response = await shopifyGraphQL(mutation, { metafields: chunk });
+    const errors = response.metafieldsSet?.userErrors || [];
+    if (errors.length > 0) {
+      console.warn('[DiamondPrice MF] Metafields Set Warning:', errors.map(e => e.message).join(', '));
+    }
+    await sleep(200);
+  }
+
+  console.log(`[DiamondPrice MF] Updated d_price, e_f_price, g_h_price integer metafields for ${products.length} products.`);
+  return true;
+}
+
+/**
+ * Runs a Shopify Bulk Operation (JSONL) for setting metafields in bulk via GraphQL.
+ */
+export async function runBulkMetafieldsSet(jsonlString) {
+  const stagedQuery = `
+    mutation {
+      stagedUploadsCreate(input: [{
+        resource: BULK_MUTATION_VARIABLES,
+        filename: "bulk_metafields.jsonl",
+        mimeType: "text/jsonl",
+        httpMethod: POST
+      }]) {
+        stagedTargets {
+          url
+          resourceUrl
+          parameters {
+            name
+            value
+          }
+        }
+        userErrors { field message }
+      }
+    }
+  `;
+  const stagedData = await shopifyGraphQL(stagedQuery);
+  const target = stagedData.stagedUploadsCreate?.stagedTargets?.[0];
+  if (!target) {
+    throw new Error(`Failed to create staged upload: ${JSON.stringify(stagedData.stagedUploadsCreate?.userErrors)}`);
+  }
+
+  const formData = new FormData();
+  let uploadedKey = null;
+  for (const param of target.parameters) {
+    let val = param.value;
+    if (param.name === 'key') {
+      if (val.includes('${filename}')) {
+        val = val.replace('${filename}', 'bulk_metafields.jsonl');
+      }
+      uploadedKey = val;
+    }
+    formData.append(param.name, val);
+  }
+  formData.append('file', new Blob([jsonlString], { type: 'text/jsonl' }), 'bulk_metafields.jsonl');
+
+  const uploadRes = await fetch(target.url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Failed to upload to Shopify staged target: ${uploadRes.status} ${errText}`);
+  }
+
+  let stagedUploadPath = uploadedKey || target.parameters?.find(p => p.name === 'key')?.value || target.resourceUrl;
+  if (stagedUploadPath && stagedUploadPath.startsWith('http')) {
+    try {
+      const urlObj = new URL(stagedUploadPath);
+      stagedUploadPath = urlObj.pathname.replace(/^\//, '');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const bulkMutation = `
+    mutation bulkOperationRunMutation($stagedUploadPath: String!) {
+      bulkOperationRunMutation(
+        mutation: "mutation($metafields: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $metafields) { userErrors { message } } }",
+        stagedUploadPath: $stagedUploadPath
+      ) {
+        bulkOperation {
+          id
+          url
+          status
+        }
+        userErrors {
+          message
+        }
+      }
+    }
+  `;
+  const bulkData = await shopifyGraphQL(bulkMutation, { stagedUploadPath });
+  const bulkOp = bulkData.bulkOperationRunMutation?.bulkOperation;
+  const userErrs = bulkData.bulkOperationRunMutation?.userErrors;
+
+  if (userErrs && userErrs.length > 0) {
+    throw new Error(`Bulk Metafields Trigger Error: ${userErrs.map(e => e.message).join(', ')}`);
+  }
+
+  return bulkOp.id;
 }

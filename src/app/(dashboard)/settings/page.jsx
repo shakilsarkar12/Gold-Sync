@@ -14,9 +14,25 @@ export default function SettingsPage() {
   const [modalStage, setModalStage] = useState('idle'); // 'idle' | 'syncing-mf' | 'prompt-price-sync' | 'syncing-prices' | 'sync-complete'
   const [mfStatus, setMfStatus] = useState(null);
   const [modalSyncStatus, setModalSyncStatus] = useState(null);
+  const [syncingGemstoneMf, setSyncingGemstoneMf] = useState(false);
   const readOnly = false; // Settings are editable at runtime
   // Snapshot of last saved settings from DB, used to detect changes
   const [savedSettings, setSavedSettings] = useState(null);
+
+  const handleSyncGemstoneMetafields = async () => {
+    setSyncingGemstoneMf(true);
+    showToast('Pushing D, E-F, G-H per-carat price metafields to Shopify...', 'info');
+    try {
+      const res = await fetch('/api/settings/sync-gemstone-mf', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to sync gemstone price metafields');
+      showToast(data.message || 'Successfully updated D, E-F, G-H price metafields on Shopify!', 'success');
+    } catch (error) {
+      showToast(error.message || 'Error syncing gemstone price metafields', 'error');
+    } finally {
+      setSyncingGemstoneMf(false);
+    }
+  };
 
   const startMakingChargeSync = async () => {
     setShowSyncModal(true);
@@ -1108,6 +1124,20 @@ export default function SettingsPage() {
                 ))}
               </tbody>
             </table>
+
+            <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={handleSyncGemstoneMetafields}
+                disabled={syncingGemstoneMf}
+                className="btn btn-secondary btn-small"
+                style={{ borderColor: 'var(--gold-primary)', color: 'var(--gold-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                title="Sync D, E-F, G-H price per carat integer metafields to Shopify"
+              >
+                <RefreshCw size={14} className={syncingGemstoneMf ? 'animate-spin' : ''} />
+                <span>{syncingGemstoneMf ? 'Updating Metafields...' : 'Update D, E-F, G-H Metafields on Shopify'}</span>
+              </button>
+            </div>
           </div>
 
           <div className="glass-card" style={{ borderColor: 'rgba(212, 175, 55, 0.45)', boxShadow: 'var(--gold-glow)' }}>

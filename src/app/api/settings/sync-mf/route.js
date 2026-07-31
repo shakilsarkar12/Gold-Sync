@@ -54,6 +54,15 @@ export async function POST() {
           });
         });
 
+        // Also update Gold Rate, Karat, Weight, and D, E-F, G-H diamond price metafields
+        const { fetchLiveGoldRates } = await import('@/lib/goldapi');
+        const { updateProductGoldRateMetafields, updateDiamondPriceMetafields } = await import('@/lib/shopify');
+        const rates = await fetchLiveGoldRates(true).catch(() => null);
+        if (rates) {
+          await updateProductGoldRateMetafields(products, rates, settings).catch(e => console.warn(e.message));
+        }
+        await updateDiamondPriceMetafields(products, settings).catch(e => console.warn(e.message));
+
         const logMsg = `[Settings] Making Charge updated to ${makingCharge}. Synced ${total} products' metafields.`;
         console.log(`[Settings] ${logMsg}`);
 

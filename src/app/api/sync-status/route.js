@@ -6,11 +6,11 @@ export async function GET() {
   try {
     let status = await getSyncStatus();
 
-    // Auto-clear stale sync status stuck for > 3 minutes without an active Shopify bulk operation
+    // Auto-clear stale sync status stuck for > 15 minutes without an active Shopify bulk operation
     if (status && status.syncing && status.startedAt && !status.bulkOperationId) {
       const elapsedMs = Date.now() - new Date(status.startedAt).getTime();
-      if (elapsedMs > 3 * 60 * 1000) {
-        console.warn('[Sync Status] Clearing stale sync status older than 3 minutes.');
+      if (elapsedMs > 15 * 60 * 1000) {
+        console.warn('[Sync Status] Clearing stale sync status older than 15 minutes.');
         status = {
           syncing: false,
           completedAt: new Date().toISOString(),

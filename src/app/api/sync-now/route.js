@@ -10,7 +10,7 @@ export async function POST() {
     const currentStatus = await getSyncStatus();
     if (currentStatus && currentStatus.syncing) {
       const elapsedMs = currentStatus.startedAt ? (Date.now() - new Date(currentStatus.startedAt).getTime()) : 0;
-      if (elapsedMs < 3 * 60 * 1000 && !currentStatus.bulkOperationId) {
+      if (elapsedMs < 15 * 60 * 1000 && !currentStatus.bulkOperationId) {
         return NextResponse.json({ message: 'Sync already in progress.' }, { status: 200 });
       }
     }
