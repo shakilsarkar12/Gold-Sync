@@ -1,19 +1,48 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle, XCircle, Loader2, Zap } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2, Zap, Clock } from 'lucide-react';
 
 /**
- * AutoSyncBanner — polls /api/sync-status every 3 seconds.
- * • Shows a top-center floating "Syncing…" pill while syncing is active.
- * • When sync completes, shows a success/error notification for 4 seconds then fades out.
+ * AutoSyncBanner — Smooth 3-Stage Progress & Notification Banner
+ * 
+ * 1. Stage 1 (Submitting): Smooth 0% -> 100% progress bar while JSONL payload is built & submitted.
+ * 2. Stage 2 (Waiting): 100% progress with "Waiting for Shopify confirmation..." status text.
+ * 3. Stage 3 (Completed): Shows "Sync Complete · X products updated" and saves activity log.
  */
 export default function AutoSyncBanner() {
   const [phase, setPhase] = useState('idle'); // 'idle' | 'syncing' | 'done-success' | 'done-error'
   const [lastResult, setLastResult] = useState(null);
   const [syncData, setSyncData] = useState(null);
+  const [progressPercent, setProgressPercent] = useState(5);
   const prevSyncing = useRef(false);
   const hideTimer = useRef(null);
+
+  // Smoothly increment progress percent from 5% to 100% while submitting JSONL
+  useEffect(() => {
+    let animInterval = null;
+    if (phase === 'syncing') {
+      if (!syncData?.bulkOperationId) {
+        // Phase 1: Fast & smooth progress 5% -> 95%
+        animInterval = setInterval(() => {
+          setProgressPercent((prev) => {
+            if (prev < 90) return prev + Math.floor(Math.random() * 8 + 5);
+            if (prev < 98) return prev + 1;
+            return 98;
+          });
+        }, 120);
+      } else {
+        // Phase 2: JSONL submitted, set progress to 100%
+        setProgressPercent(100);
+      }
+    } else {
+      setProgressPercent(5);
+    }
+
+    return () => {
+      if (animInterval) clearInterval(animInterval);
+    };
+  }, [phase, syncData?.bulkOperationId]);
 
   const poll = useCallback(async () => {
     try {
@@ -24,29 +53,27 @@ export default function AutoSyncBanner() {
       const isSyncing = !!data.syncing;
 
       if (isSyncing) {
-        // Clear any pending hide timer
         if (hideTimer.current) clearTimeout(hideTimer.current);
         setPhase('syncing');
         setSyncData(data);
         prevSyncing.current = true;
       } else if (prevSyncing.current && !isSyncing && data.lastResult) {
-        // Transition: was syncing, now done
+        // Phase 3: Transition from syncing to completed
         prevSyncing.current = false;
         setLastResult(data.lastResult);
         setPhase(data.lastResult.success ? 'done-success' : 'done-error');
 
-        // Auto-hide after 4 seconds
-        hideTimer.current = setTimeout(() => setPhase('idle'), 4000);
+        // Auto-hide after 5 seconds
+        hideTimer.current = setTimeout(() => setPhase('idle'), 5000);
       }
     } catch {
-      // Silently ignore network errors
+      // Silently ignore polling errors
     }
   }, []);
 
   useEffect(() => {
-    // Poll immediately on mount, then every 3 seconds
     poll();
-    const interval = setInterval(poll, 3000);
+    const interval = setInterval(poll, 2500);
     return () => {
       clearInterval(interval);
       if (hideTimer.current) clearTimeout(hideTimer.current);
@@ -57,6 +84,7 @@ export default function AutoSyncBanner() {
 
   const isSyncing = phase === 'syncing';
   const isSuccess = phase === 'done-success';
+  const isWaitingShopify = isSyncing && (progressPercent >= 98 || !!syncData?.bulkOperationId);
 
   return (
     <div
@@ -76,65 +104,68 @@ export default function AutoSyncBanner() {
           flexDirection: 'column',
           alignItems: 'stretch',
           gap: '0.4rem',
-          padding: '0.65rem 1.25rem',
+          padding: '0.7rem 1.35rem',
           borderRadius: '16px',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
           border: `1px solid ${isSyncing ? 'rgba(212,175,55,0.45)' : isSuccess ? 'rgba(16,185,129,0.45)' : 'rgba(239,68,68,0.45)'}`,
           background: isSyncing
-            ? 'rgba(18, 16, 8, 0.92)'
+            ? 'rgba(18, 16, 8, 0.94)'
             : isSuccess
-            ? 'rgba(6, 28, 18, 0.92)'
-            : 'rgba(28, 8, 8, 0.92)',
+              ? 'rgba(6, 28, 18, 0.94)'
+              : 'rgba(28, 8, 8, 0.94)',
           boxShadow: isSyncing
-            ? '0 6px 30px rgba(212,175,55,0.3), 0 0 0 1px rgba(212,175,55,0.15)'
+            ? '0 6px 30px rgba(212,175,55,0.35), 0 0 0 1px rgba(212,175,55,0.2)'
             : isSuccess
-            ? '0 6px 30px rgba(16,185,129,0.3)'
-            : '0 6px 30px rgba(239,68,68,0.3)',
+              ? '0 6px 30px rgba(16,185,129,0.35)'
+              : '0 6px 30px rgba(239,68,68,0.35)',
           fontSize: '0.875rem',
           fontWeight: 600,
           color: isSyncing ? '#d4af37' : isSuccess ? '#10b981' : '#ef4444',
           letterSpacing: '0.3px',
-          minWidth: isSyncing ? '280px' : 'auto',
+          minWidth: isSyncing ? '340px' : 'auto',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.85rem' }}>
           {isSyncing && (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Loader2
-                  size={15}
-                  style={{ animation: 'spin 0.9s linear infinite', flexShrink: 0 }}
-                />
-                <Zap size={13} style={{ flexShrink: 0, opacity: 0.75 }} />
+                {isWaitingShopify ? (
+                  <Clock size={15} style={{ animation: 'pulse 1.2s infinite', flexShrink: 0 }} />
+                ) : (
+                  <Loader2 size={15} style={{ animation: 'spin 0.9s linear infinite', flexShrink: 0 }} />
+                )}
+                <Zap size={13} style={{ flexShrink: 0, opacity: 0.8 }} />
                 <span>
-                  {syncData?.isAuto ? 'Auto Sync Running…' : 'Manual Sync Running…'}
+                  {isWaitingShopify
+                    ? 'Waiting for Shopify confirmation...'
+                    : 'Submitting request to Shopify...'}
                 </span>
               </div>
-              <span style={{ fontSize: '0.8rem', opacity: 0.9, fontWeight: 700 }}>
-                {syncData?.totalItems > 0
-                  ? `${syncData.completedItems || 0}/${syncData.totalItems}`
-                  : 'Starting...'}
+              <span style={{ fontSize: '0.8rem', opacity: 0.95, fontWeight: 700 }}>
+                {isWaitingShopify ? '100%' : `${progressPercent}%`}
               </span>
             </>
           )}
+
           {isSuccess && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <CheckCircle size={15} style={{ flexShrink: 0 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+              <CheckCircle size={16} style={{ flexShrink: 0 }} />
               <span>
                 Sync Complete
                 {lastResult?.successCount > 0
-                  ? ` · ${lastResult.successCount} product${lastResult.successCount > 1 ? 's' : ''} updated`
+                  ? ` · ${lastResult.successCount.toLocaleString()} products updated & logged`
                   : ' · Already up to date'}
               </span>
             </div>
           )}
+
           {!isSyncing && !isSuccess && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <XCircle size={15} style={{ flexShrink: 0 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+              <XCircle size={16} style={{ flexShrink: 0 }} />
               <span>
                 Sync Failed
-                {lastResult?.failCount > 0 ? ` · ${lastResult.failCount} error${lastResult.failCount > 1 ? 's' : ''}` : ''}
+                {lastResult?.failCount > 0 ? ` · ${lastResult.failCount} error(s)` : ''}
               </span>
             </div>
           )}
@@ -142,14 +173,17 @@ export default function AutoSyncBanner() {
 
         {/* Live Progress Bar when syncing */}
         {isSyncing && (
-          <div style={{ width: '100%', height: '5px', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: '3px', overflow: 'hidden' }}>
-            <div style={{
-              height: '100%',
-              width: `${syncData?.totalItems ? Math.min(100, Math.round(((syncData.completedItems || 0) / syncData.totalItems) * 100)) : 5}%`,
-              backgroundColor: 'var(--gold-primary)',
-              borderRadius: '3px',
-              transition: 'width 0.4s ease'
-            }} />
+          <div style={{ width: '100%', height: '5px', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: '3px', overflow: 'hidden', marginTop: '0.2rem' }}>
+            <div
+              style={{
+                height: '100%',
+                width: `${isWaitingShopify ? 100 : progressPercent}%`,
+                backgroundColor: 'var(--gold-primary)',
+                borderRadius: '3px',
+                transition: 'width 0.2s ease-out',
+                boxShadow: isWaitingShopify ? '0 0 10px rgba(212,175,55,0.8)' : 'none',
+              }}
+            />
           </div>
         )}
       </div>
