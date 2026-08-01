@@ -31,6 +31,13 @@ export async function POST() {
           : (parseFloat(settings.defaultWeight) || 3.5);
         const vKarat = variant.karatValue !== null ? variant.karatValue : product.karatValue;
 
+        const sdWeight = variant.smallDiamondWeight !== null && variant.smallDiamondWeight !== undefined
+          ? variant.smallDiamondWeight
+          : product.smallDiamondWeight;
+        const sdRate = variant.smallDiamondRatePerCarat !== null && variant.smallDiamondRatePerCarat !== undefined
+          ? variant.smallDiamondRatePerCarat
+          : product.smallDiamondRatePerCarat;
+
         const { breakdown } = calculateVariantPrice({
           weight: vWeight,
           karatStr: vKarat,
@@ -38,16 +45,12 @@ export async function POST() {
           diamondShape: variant.shapeValue,
           diamondCrt: variant.crtValue,
           diamondColor: variant.colorValue,
+          smallDiamondWeight: sdWeight,
+          smallDiamondRatePerCarat: sdRate,
           rates,
           settings,
           variantTitle: variant.title,
         });
-
-        const sdWeight = variant.smallDiamondWeight;
-        const sdPricePerCarat = parseFloat(settings.smallDiamondPricePerCarat) || 0;
-        const smallDiamondValue = (sdWeight != null && sdWeight > 0 && sdPricePerCarat > 0)
-          ? Number((sdWeight * sdPricePerCarat).toFixed(2))
-          : 0;
 
         allGoldBreakdowns.push({
           variantId: variant.id,
@@ -55,7 +58,7 @@ export async function POST() {
             goldRatePerGram: breakdown.goldPricePerGram,
             totalGoldValue: breakdown.baseGoldCost,
             centreStoneValue: breakdown.diamondPrice,
-            smallDiamondValue,
+            smallDiamondValue: breakdown.smallDiamondValue,
             makingChargeRate: parseFloat(settings.makingChargePerGram) || 0,
             totalMakingCharge: breakdown.makingCharges,
           },

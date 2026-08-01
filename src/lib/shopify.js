@@ -156,6 +156,8 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
   const sdGradeKey = settings.smallDiamondGradeKey || 'small_diamonds_grade';
   const sdWeightNamespace = settings.smallDiamondWeightNamespace || 'custom';
   const sdWeightKey = settings.smallDiamondWeightKey || 'small_diamonds_weight';
+  const sdRateNamespace = settings.smallDiamondRateNamespace || 'custom';
+  const sdRateKey = settings.smallDiamondRateKey || 'small_diamonds_rate_per_carat';
 
   let shopifyQuery = 'status:ACTIVE';
   if (searchQuery) {
@@ -187,6 +189,8 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       $sdGradeKey: String!
       $sdWeightNamespace: String!
       $sdWeightKey: String!
+      $sdRateNamespace: String!
+      $sdRateKey: String!
     ) {
       products(first: $first, after: $after, query: $query) {
         pageInfo {
@@ -213,6 +217,16 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
               type
             }
             diamondMetafield: metafield(namespace: $diamondNamespace, key: $diamondKey) {
+              id
+              value
+              type
+            }
+            sdWeightMetafield: metafield(namespace: $sdWeightNamespace, key: $sdWeightKey) {
+              id
+              value
+              type
+            }
+            sdRateMetafield: metafield(namespace: $sdRateNamespace, key: $sdRateKey) {
               id
               value
               type
@@ -268,6 +282,11 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
                     value
                     type
                   }
+                  vSmallDiamRateMetafield: metafield(namespace: $sdRateNamespace, key: $sdRateKey) {
+                    id
+                    value
+                    type
+                  }
                 }
               }
             }
@@ -301,6 +320,8 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
     sdGradeKey,
     sdWeightNamespace,
     sdWeightKey,
+    sdRateNamespace,
+    sdRateKey,
   });
 
   // Helper to extract diamond carats (including multi-stone addition like "1.5ct + 1.5ct") and gold karat
@@ -444,6 +465,9 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
       smallDiamondWeight: variant.vSmallDiamWeightMetafield?.value
         ? parseFloat(variant.vSmallDiamWeightMetafield.value)
         : null,
+      smallDiamondRatePerCarat: variant.vSmallDiamRateMetafield?.value
+        ? parseFloat(variant.vSmallDiamRateMetafield.value)
+        : null,
       weightMetafieldId: variant.vWeightMetafield?.id,
       karatMetafieldId: variant.vKaratMetafield?.id,
       shapeMetafieldId: variant.vShapeMetafield?.id,
@@ -472,6 +496,8 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
         $sdGradeKey: String!
         $sdWeightNamespace: String!
         $sdWeightKey: String!
+        $sdRateNamespace: String!
+        $sdRateKey: String!
       ) {
         product(id: $productId) {
           variants(first: 100, after: $after) {
@@ -525,6 +551,11 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
                   value
                   type
                 }
+                vSmallDiamRateMetafield: metafield(namespace: $sdRateNamespace, key: $sdRateKey) {
+                  id
+                  value
+                  type
+                }
               }
             }
           }
@@ -554,6 +585,8 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
         sdGradeKey,
         sdWeightNamespace,
         sdWeightKey,
+        sdRateNamespace,
+        sdRateKey,
       });
 
       const variantsPage = data.product?.variants;
@@ -584,6 +617,8 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
         const weightValue = node.weightMetafield?.value ? parseFloat(node.weightMetafield.value) : null;
         const karatValue = node.karatMetafield?.value || null;
         const diamondPrice = node.diamondMetafield?.value ? parseFloat(node.diamondMetafield.value) : 0;
+        const smallDiamondWeight = node.sdWeightMetafield?.value ? parseFloat(node.sdWeightMetafield.value) : null;
+        const smallDiamondRatePerCarat = node.sdRateMetafield?.value ? parseFloat(node.sdRateMetafield.value) : null;
 
         const variantsPage = node.variants;
         let variants = (variantsPage?.edges || []).map(({ node: variant }) => mapVariant(variant, node.tags || []));
@@ -606,6 +641,8 @@ export async function fetchShopifyProducts(searchQuery, bypassCache = false) {
           weightValue,
           karatValue,
           diamondPrice,
+          smallDiamondWeight,
+          smallDiamondRatePerCarat,
           weightMetafieldId: node.weightMetafield?.id,
           karatMetafieldId: node.karatMetafield?.id,
           diamondMetafieldId: node.diamondMetafield?.id,

@@ -46,6 +46,8 @@ const DEFAULT_SETTINGS = {
   smallDiamondGradeKey: 'small_diamonds_grade',
   smallDiamondWeightNamespace: 'custom',
   smallDiamondWeightKey: 'small_diamonds_weight',
+  smallDiamondRateNamespace: 'custom',
+  smallDiamondRateKey: 'small_diamonds_rate_per_carat',
   smallDiamondPricePerCarat: 0,
   bdGoldRatePerGramNamespace: 'custom',
   bdGoldRatePerGramKey: 'gold_rate_per_gram',

@@ -331,7 +331,8 @@ export default function SettingsPage() {
   // Pricing-related keys — only trigger sync if these change
   const PRICING_KEYS = [
     'gstPercentage', 'makingChargePerGram', 'makingChargeFixed',
-    'fixedMarkup', 'markupPercentage', 'diamondPrices',
+    'fixedMarkup', 'markupPercentage', 'diamondPrices', 'smallDiamondPricePerCarat',
+    'smallDiamondWeightKey', 'smallDiamondRateKey',
   ];
 
   // Deep-equal check (JSON stringify is sufficient for flat/nested numbers)
@@ -922,7 +923,7 @@ export default function SettingsPage() {
                       <input type="text" name="smallDiamondGradeKey" className="form-input" value={settings.smallDiamondGradeKey} onChange={handleChange} placeholder="small_diamonds_grade" />
                     </div>
                   </div>
-                  <div className="grid-2" style={{ gap: '0.75rem' }}>
+                  <div className="grid-2" style={{ gap: '0.75rem', marginBottom: '0.5rem' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label" style={{ fontSize: '0.75rem' }}>Small Diamond Weight — Namespace</label>
                       <input type="text" name="smallDiamondWeightNamespace" className="form-input" value={settings.smallDiamondWeightNamespace} onChange={handleChange} placeholder="custom" />
@@ -930,6 +931,16 @@ export default function SettingsPage() {
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label" style={{ fontSize: '0.75rem' }}>Small Diamond Weight — Key</label>
                       <input type="text" name="smallDiamondWeightKey" className="form-input" value={settings.smallDiamondWeightKey} onChange={handleChange} placeholder="small_diamonds_weight" />
+                    </div>
+                  </div>
+                  <div className="grid-2" style={{ gap: '0.75rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.75rem' }}>Small Diamond Rate per Carat — Namespace</label>
+                      <input type="text" name="smallDiamondRateNamespace" className="form-input" value={settings.smallDiamondRateNamespace || 'custom'} onChange={handleChange} placeholder="custom" />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.75rem' }}>Small Diamond Rate per Carat — Key</label>
+                      <input type="text" name="smallDiamondRateKey" className="form-input" value={settings.smallDiamondRateKey || 'small_diamonds_rate_per_carat'} onChange={handleChange} placeholder="small_diamonds_rate_per_carat" />
                     </div>
                   </div>
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>

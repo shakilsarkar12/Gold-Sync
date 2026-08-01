@@ -56,6 +56,13 @@ export async function GET(request) {
 
         isAnyVariantGold = true;
 
+        const sdWeight = variant.smallDiamondWeight !== null && variant.smallDiamondWeight !== undefined
+          ? variant.smallDiamondWeight
+          : product.smallDiamondWeight;
+        const sdRate = variant.smallDiamondRatePerCarat !== null && variant.smallDiamondRatePerCarat !== undefined
+          ? variant.smallDiamondRatePerCarat
+          : product.smallDiamondRatePerCarat;
+
         // Run calculation: weight and diamond details are resolved with variant priority
         const { finalPrice, compareAtPrice, breakdown } = calculateVariantPrice({
           weight: vWeight,
@@ -64,6 +71,8 @@ export async function GET(request) {
           diamondShape: variant.shapeValue,
           diamondCrt: variant.crtValue,
           diamondColor: variant.colorValue,
+          smallDiamondWeight: sdWeight,
+          smallDiamondRatePerCarat: sdRate,
           rates,
           settings,
           variantTitle: variant.title
