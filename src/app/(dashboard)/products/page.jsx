@@ -197,6 +197,7 @@ export default function ProductsPage() {
           variantTitle: variant.title,
           newPrice: variant.calculatedPrice,
           oldPrice: variant.price,
+          breakdown: variant.priceBreakdown,
           // Also push any edited metafield values to Shopify
           metafields: {
             weight: vEdits.weight || '',
@@ -235,6 +236,7 @@ export default function ProductsPage() {
             variantTitle: v.title,
             newPrice: v.calculatedPrice,
             oldPrice: v.price,
+            breakdown: v.priceBreakdown,
             metafields: {
               weight: vEdits.weight || '',
               karat: vEdits.karat || '',
@@ -263,10 +265,18 @@ export default function ProductsPage() {
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed bulk sync');
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to execute bulk sync');
+      }
 
-      showToast(`Bulk sync complete. Updated ${data.successCount} variant prices + metafields.`, 'success');
+      const result = await res.json();
+      if (result.queued) {
+        showToast(`Queued bulk update for ${result.totalItems} items. Updates are processing on Shopify!`, 'info');
+      } else {
+        showToast(`Bulk sync complete: ${result.successCount} updated successfully`, 'success');
+      }
+      setSelectedVariants(new Set());
       await fetchProducts(true);
     } catch (error) {
       showToast(error.message || 'Error executing bulk sync', 'error');
@@ -290,6 +300,7 @@ export default function ProductsPage() {
             variantTitle: v.title,
             newPrice: v.calculatedPrice !== null ? v.calculatedPrice : v.price,
             oldPrice: v.price,
+            breakdown: v.priceBreakdown,
             metafields: {
               weight: vEdits.weight || '',
               karat: vEdits.karat || '',
@@ -798,6 +809,12 @@ export default function ProductsPage() {
                                         <span>Diamond Price:</span>
                                         <span>{currency} {variant.priceBreakdown.diamondPrice}</span>
                                       </div>
+                                      {(variant.priceBreakdown.smallDiamondValue > 0 || variant.priceBreakdown.smallDiamondWeight > 0) && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+                                          <span>Small Diamond Price:</span>
+                                          <span>{currency} {variant.priceBreakdown.smallDiamondValue || 0}</span>
+                                        </div>
+                                      )}
                                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
                                         <span>Making Charges:</span>
                                         <span>{currency} {variant.priceBreakdown.makingCharges}</span>

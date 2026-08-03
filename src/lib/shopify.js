@@ -729,14 +729,23 @@ export async function updateShopifyVariantPricesBulk(productId, variantsUpdates)
   return true;
 }
 
-export async function updateShopifyProductMetafields(productId, weight, karat, diamondPrice) {
+export async function updateShopifyProductMetafields(productId, weight, karat, diamondPrice, smallDiamondWeight, smallDiamondRatePerCarat) {
   const settings = await getSettings();
+
   const weightNamespace = settings.weightNamespace || 'custom';
   const weightKey = settings.weightKey || 'gold_weight';
+
   const karatNamespace = settings.karatNamespace || 'custom';
   const karatKey = settings.karatKey || 'gold_karat';
+
   const diamondNamespace = settings.diamondNamespace || 'custom';
   const diamondKey = settings.diamondKey || 'diamond_price';
+
+  const sdWeightNamespace = settings.smallDiamondWeightNamespace || 'custom';
+  const sdWeightKey = settings.smallDiamondWeightKey || 'small_diamonds_weight';
+
+  const sdRateNamespace = settings.smallDiamondRateNamespace || 'custom';
+  const sdRateKey = settings.smallDiamondRateKey || 'small_diamonds_rate_per_carat';
 
   const mutation = `
     mutation UpdateProductMetafields($metafields: [MetafieldsSetInput!]!) {
@@ -757,7 +766,7 @@ export async function updateShopifyProductMetafields(productId, weight, karat, d
 
   const metafields = [];
 
-  if (weight !== null && weight !== undefined) {
+  if (weight !== null && weight !== undefined && weight !== '') {
     metafields.push({
       ownerId: productId,
       namespace: weightNamespace,
@@ -767,7 +776,7 @@ export async function updateShopifyProductMetafields(productId, weight, karat, d
     });
   }
 
-  if (karat !== null && karat !== undefined) {
+  if (karat !== null && karat !== undefined && karat !== '') {
     metafields.push({
       ownerId: productId,
       namespace: karatNamespace,
@@ -777,12 +786,32 @@ export async function updateShopifyProductMetafields(productId, weight, karat, d
     });
   }
 
-  if (diamondPrice !== null && diamondPrice !== undefined) {
+  if (diamondPrice !== null && diamondPrice !== undefined && diamondPrice !== '') {
     metafields.push({
       ownerId: productId,
       namespace: diamondNamespace,
       key: diamondKey,
       value: diamondPrice.toString(),
+      type: 'number_decimal',
+    });
+  }
+
+  if (smallDiamondWeight !== null && smallDiamondWeight !== undefined && smallDiamondWeight !== '') {
+    metafields.push({
+      ownerId: productId,
+      namespace: sdWeightNamespace,
+      key: sdWeightKey,
+      value: smallDiamondWeight.toString(),
+      type: 'number_decimal',
+    });
+  }
+
+  if (smallDiamondRatePerCarat !== null && smallDiamondRatePerCarat !== undefined && smallDiamondRatePerCarat !== '') {
+    metafields.push({
+      ownerId: productId,
+      namespace: sdRateNamespace,
+      key: sdRateKey,
+      value: smallDiamondRatePerCarat.toString(),
       type: 'number_decimal',
     });
   }
@@ -801,7 +830,7 @@ export async function updateShopifyProductMetafields(productId, weight, karat, d
 }
 
 export async function updateShopifyVariantMetafieldsBulk(variantsData) {
-  // variantsData should be an array of: { variantId, weight, karat, shape, crt, color }
+  // variantsData should be an array of: { variantId, weight, karat, shape, crt, color, smallDiamondWeight, smallDiamondRatePerCarat }
   if (!variantsData || variantsData.length === 0) return true;
 
   const settings = await getSettings();
@@ -820,6 +849,12 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
 
   const diamondColorNamespace = settings.diamondColorNamespace || 'custom';
   const diamondColorKey = settings.diamondColorKey || 'diamond_color';
+
+  const sdWeightNamespace = settings.smallDiamondWeightNamespace || 'custom';
+  const sdWeightKey = settings.smallDiamondWeightKey || 'small_diamonds_weight';
+
+  const sdRateNamespace = settings.smallDiamondRateNamespace || 'custom';
+  const sdRateKey = settings.smallDiamondRateKey || 'small_diamonds_rate_per_carat';
 
   const mutation = `
     mutation UpdateVariantMetafields($metafields: [MetafieldsSetInput!]!) {
@@ -841,9 +876,9 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
   let allMetafields = [];
 
   for (const data of variantsData) {
-    const { variantId, weight, karat, shape, crt, color } = data;
+    const { variantId, weight, karat, shape, crt, color, smallDiamondWeight, smallDiamondRatePerCarat } = data;
 
-    if (weight !== null && weight !== undefined) {
+    if (weight !== null && weight !== undefined && weight !== '') {
       allMetafields.push({
         ownerId: variantId,
         namespace: variantWeightNamespace,
@@ -853,7 +888,7 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
       });
     }
 
-    if (karat !== null && karat !== undefined) {
+    if (karat !== null && karat !== undefined && karat !== '') {
       allMetafields.push({
         ownerId: variantId,
         namespace: variantKaratNamespace,
@@ -890,7 +925,7 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
       });
     }
 
-    if (crt !== null && crt !== undefined) {
+    if (crt !== null && crt !== undefined && crt !== '') {
       allMetafields.push({
         ownerId: variantId,
         namespace: diamondCrtNamespace,
@@ -900,13 +935,33 @@ export async function updateShopifyVariantMetafieldsBulk(variantsData) {
       });
     }
 
-    if (color !== null && color !== undefined) {
+    if (color !== null && color !== undefined && color !== '') {
       allMetafields.push({
         ownerId: variantId,
         namespace: diamondColorNamespace,
         key: diamondColorKey,
         value: color.trim(),
         type: 'single_line_text_field',
+      });
+    }
+
+    if (smallDiamondWeight !== null && smallDiamondWeight !== undefined && smallDiamondWeight !== '') {
+      allMetafields.push({
+        ownerId: variantId,
+        namespace: sdWeightNamespace,
+        key: sdWeightKey,
+        value: smallDiamondWeight.toString(),
+        type: 'number_decimal',
+      });
+    }
+
+    if (smallDiamondRatePerCarat !== null && smallDiamondRatePerCarat !== undefined && smallDiamondRatePerCarat !== '') {
+      allMetafields.push({
+        ownerId: variantId,
+        namespace: sdRateNamespace,
+        key: sdRateKey,
+        value: smallDiamondRatePerCarat.toString(),
+        type: 'number_decimal',
       });
     }
   }

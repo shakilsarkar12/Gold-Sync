@@ -107,9 +107,12 @@ export function calculateVariantPrice(weightOrParams, karatStr, diamondPrice, ra
   }
 
   // Calculate small diamond price (custom.small_diamonds_weight * custom.small_diamonds_rate_per_carat)
-  const sdWeight = parseFloat(smallDiamondWeight) || 0;
-  const sdRate = (smallDiamondRatePerCarat !== undefined && smallDiamondRatePerCarat !== null)
-    ? parseFloat(smallDiamondRatePerCarat)
+  const parsedSdWeight = parseFloat(smallDiamondWeight);
+  const sdWeight = (!isNaN(parsedSdWeight) && parsedSdWeight > 0) ? parsedSdWeight : 0;
+  
+  const parsedSdRate = parseFloat(smallDiamondRatePerCarat);
+  const sdRate = (!isNaN(parsedSdRate) && parsedSdRate > 0)
+    ? parsedSdRate
     : (parseFloat(appSettings?.smallDiamondPricePerCarat) || 0);
 
   const calculatedSmallDiamondPrice = (sdWeight > 0 && sdRate > 0)
@@ -189,12 +192,17 @@ export async function runProductSync(isAuto = false) {
           : (parseFloat(settings.defaultWeight) || 3.5);
         const vKarat = variant.karatValue !== null ? variant.karatValue : product.karatValue;
 
-        const sdWeight = variant.smallDiamondWeight !== null && variant.smallDiamondWeight !== undefined 
-          ? variant.smallDiamondWeight 
-          : product.smallDiamondWeight;
-        const sdRate = variant.smallDiamondRatePerCarat !== null && variant.smallDiamondRatePerCarat !== undefined 
-          ? variant.smallDiamondRatePerCarat 
-          : product.smallDiamondRatePerCarat;
+        const vSdWeight = parseFloat(variant.smallDiamondWeight);
+        const pSdWeight = parseFloat(product.smallDiamondWeight);
+        const sdWeight = (!isNaN(vSdWeight) && vSdWeight > 0)
+          ? vSdWeight
+          : (!isNaN(pSdWeight) && pSdWeight > 0 ? pSdWeight : 0);
+
+        const vSdRate = parseFloat(variant.smallDiamondRatePerCarat);
+        const pSdRate = parseFloat(product.smallDiamondRatePerCarat);
+        const sdRate = (!isNaN(vSdRate) && vSdRate > 0)
+          ? vSdRate
+          : (!isNaN(pSdRate) && pSdRate > 0 ? pSdRate : (parseFloat(settings.smallDiamondPricePerCarat) || 0));
 
         const { finalPrice, compareAtPrice, breakdown } = calculateVariantPrice({
           weight: vWeight,
@@ -224,10 +232,8 @@ export async function runProductSync(isAuto = false) {
         });
         
         const priceDiff = Math.abs(parseFloat(variant.price) - finalPrice);
-        const currentCompareAt = parseFloat(variant.compareAtPrice) || 0;
-        const compareDiff = Math.abs(currentCompareAt - compareAtPrice);
 
-        if (priceDiff > 0.05 || compareDiff > 0.05) {
+        if (priceDiff > 0.05) {
           outOfSyncItems.push({
             productId: product.id,
             productTitle: product.title,

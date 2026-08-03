@@ -125,8 +125,8 @@ async function getMysqlPool() {
     } catch (error) {
       console.error('Failed to connect to MySQL:', error.message);
       if (error.message && (error.message.includes('max_connections_per_hour') || error.code === 'ER_USER_LIMIT_REACHED')) {
-        console.warn('[DB] MySQL connection limit per hour reached. Temporarily switching to in-memory/file storage for 60s.');
-        global.__mysqlDisabledUntil = Date.now() + 60000;
+        console.warn('[DB] MySQL connection limit per hour reached. Temporarily switching to in-memory/file storage for 15m.');
+        global.__mysqlDisabledUntil = Date.now() + 15 * 60000;
       }
       mysqlPool = null;
       global.__mysqlPool = null;
@@ -177,9 +177,14 @@ async function getDoc(collection, doc_id, isRetry = false) {
       return data;
     }
   } catch (error) {
-    if ((error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST') && !isRetry) {
+    if (error.message && (error.message.includes('max_connections_per_hour') || error.code === 'ER_USER_LIMIT_REACHED')) {
+      if (!global.__mysqlDisabledUntil || Date.now() > global.__mysqlDisabledUntil) {
+        console.warn('[DB] MySQL connection limit per hour reached (max_connections_per_hour). Switching to local JSON file storage for 15m.');
+      }
+      global.__mysqlDisabledUntil = Date.now() + 15 * 60000; // 15 mins fallback
       mysqlPool = null;
-      return getDoc(collection, doc_id, true);
+      global.__mysqlPool = null;
+      return null;
     }
     console.error(`MySQL getDoc error (${collection}/${doc_id}):`, error.message);
   }
@@ -201,6 +206,15 @@ async function setDoc(collection, doc_id, data, isRetry = false) {
     if ((error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST') && !isRetry) {
       mysqlPool = null;
       return setDoc(collection, doc_id, data, true);
+    }
+    if (error.message && (error.message.includes('max_connections_per_hour') || error.code === 'ER_USER_LIMIT_REACHED')) {
+      if (!global.__mysqlDisabledUntil || Date.now() > global.__mysqlDisabledUntil) {
+        console.warn('[DB] MySQL connection limit per hour reached (max_connections_per_hour). Switching to local JSON file storage for 15m.');
+      }
+      global.__mysqlDisabledUntil = Date.now() + 15 * 60000; // 15 mins fallback
+      mysqlPool = null;
+      global.__mysqlPool = null;
+      return false;
     }
     console.error(`MySQL setDoc error (${collection}/${doc_id}):`, error.message);
     return false;

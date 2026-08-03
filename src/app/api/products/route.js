@@ -7,6 +7,7 @@ import {
   updateShopifyProductMetafields,
   updateShopifyVariantMetafieldsBulk,
   updateProductGoldRateMetafields,
+  updateVariantBreakdownMetafields,
 } from '@/lib/shopify';
 import { calculateVariantPrice, runProductSync } from '@/lib/sync';
 import { initScheduler } from '@/lib/scheduler';
@@ -56,12 +57,17 @@ export async function GET(request) {
 
         isAnyVariantGold = true;
 
-        const sdWeight = variant.smallDiamondWeight !== null && variant.smallDiamondWeight !== undefined
-          ? variant.smallDiamondWeight
-          : product.smallDiamondWeight;
-        const sdRate = variant.smallDiamondRatePerCarat !== null && variant.smallDiamondRatePerCarat !== undefined
-          ? variant.smallDiamondRatePerCarat
-          : product.smallDiamondRatePerCarat;
+        const vSdWeight = parseFloat(variant.smallDiamondWeight);
+        const pSdWeight = parseFloat(product.smallDiamondWeight);
+        const sdWeight = (!isNaN(vSdWeight) && vSdWeight > 0)
+          ? vSdWeight
+          : (!isNaN(pSdWeight) && pSdWeight > 0 ? pSdWeight : 0);
+
+        const vSdRate = parseFloat(variant.smallDiamondRatePerCarat);
+        const pSdRate = parseFloat(product.smallDiamondRatePerCarat);
+        const sdRate = (!isNaN(vSdRate) && vSdRate > 0)
+          ? vSdRate
+          : (!isNaN(pSdRate) && pSdRate > 0 ? pSdRate : (parseFloat(settings.smallDiamondPricePerCarat) || 0));
 
         // Run calculation: weight and diamond details are resolved with variant priority
         const { finalPrice, compareAtPrice, breakdown } = calculateVariantPrice({
@@ -79,9 +85,7 @@ export async function GET(request) {
         });
 
         const priceDiff = Math.abs(parseFloat(variant.price) - finalPrice);
-        const currentCompareAt = parseFloat(variant.compareAtPrice) || 0;
-        const compareDiff = Math.abs(currentCompareAt - compareAtPrice);
-        const outOfSync = priceDiff > 0.05 || compareDiff > 0.05;
+        const outOfSync = priceDiff > 0.05;
 
         if (outOfSync) {
           productOutOfSync = true;
@@ -123,7 +127,7 @@ export async function POST(request) {
     const { action, ...payload } = await request.json();
     
     if (action === 'update_metafields') {
-      const { productId, variantId, weight, karat, shape, crt, color, diamondPrice } = payload;
+      const { productId, variantId, weight, karat, shape, crt, color, diamondPrice, smallDiamondWeight, smallDiamondRatePerCarat } = payload;
       
       if (variantId) {
         const parsedWeight = weight !== undefined && weight !== '' ? parseFloat(weight) : null;
@@ -131,6 +135,8 @@ export async function POST(request) {
         const parsedShape = shape !== undefined && shape !== '' ? shape : null;
         const parsedCrt = crt !== undefined && crt !== '' ? parseFloat(crt) : null;
         const parsedColor = color !== undefined && color !== '' ? color : null;
+        const parsedSdWeight = smallDiamondWeight !== undefined && smallDiamondWeight !== '' ? parseFloat(smallDiamondWeight) : null;
+        const parsedSdRate = smallDiamondRatePerCarat !== undefined && smallDiamondRatePerCarat !== '' ? parseFloat(smallDiamondRatePerCarat) : null;
 
         await updateShopifyVariantMetafieldsBulk([{
           variantId,
@@ -139,6 +145,8 @@ export async function POST(request) {
           shape: parsedShape,
           crt: parsedCrt,
           color: parsedColor,
+          smallDiamondWeight: parsedSdWeight,
+          smallDiamondRatePerCarat: parsedSdRate,
         }]);
 
         return NextResponse.json({ success: true, message: 'Variant metafields updated successfully' });
@@ -150,8 +158,10 @@ export async function POST(request) {
         const parsedWeight = weight !== undefined && weight !== '' ? parseFloat(weight) : null;
         const parsedKarat = karat !== undefined && karat !== '' ? karat : null;
         const parsedDiamondPrice = diamondPrice !== undefined && diamondPrice !== '' ? parseFloat(diamondPrice) : null;
+        const parsedSdWeight = smallDiamondWeight !== undefined && smallDiamondWeight !== '' ? parseFloat(smallDiamondWeight) : null;
+        const parsedSdRate = smallDiamondRatePerCarat !== undefined && smallDiamondRatePerCarat !== '' ? parseFloat(smallDiamondRatePerCarat) : null;
 
-        await updateShopifyProductMetafields(productId, parsedWeight, parsedKarat, parsedDiamondPrice);
+        await updateShopifyProductMetafields(productId, parsedWeight, parsedKarat, parsedDiamondPrice, parsedSdWeight, parsedSdRate);
         
         return NextResponse.json({ success: true, message: 'Product metafields updated successfully' });
       }
@@ -166,15 +176,17 @@ export async function POST(request) {
 
       // 1. Save any edited metafields to Shopify first
       if (metafields) {
-        const parsedWeight = metafields.weight !== '' ? parseFloat(metafields.weight) : null;
-        const parsedKarat = metafields.karat !== '' ? metafields.karat : null;
-        const parsedShape = metafields.shape !== '' ? metafields.shape : null;
-        const parsedCrt = metafields.crt !== '' ? parseFloat(metafields.crt) : null;
-        const parsedColor = metafields.color !== '' ? metafields.color : null;
+        const parsedWeight = metafields.weight !== undefined && metafields.weight !== '' ? parseFloat(metafields.weight) : null;
+        const parsedKarat = metafields.karat !== undefined && metafields.karat !== '' ? metafields.karat : null;
+        const parsedShape = metafields.shape !== undefined && metafields.shape !== '' ? metafields.shape : null;
+        const parsedCrt = metafields.crt !== undefined && metafields.crt !== '' ? parseFloat(metafields.crt) : null;
+        const parsedColor = metafields.color !== undefined && metafields.color !== '' ? metafields.color : null;
+        const parsedSdWeight = metafields.smallDiamondWeight !== undefined && metafields.smallDiamondWeight !== '' ? parseFloat(metafields.smallDiamondWeight) : null;
+        const parsedSdRate = metafields.smallDiamondRatePerCarat !== undefined && metafields.smallDiamondRatePerCarat !== '' ? parseFloat(metafields.smallDiamondRatePerCarat) : null;
 
-        // Only call if at least one metafield has a value
         const hasAnyMetafield = parsedWeight !== null || parsedKarat !== null ||
-          parsedShape !== null || parsedCrt !== null || parsedColor !== null;
+          parsedShape !== null || parsedCrt !== null || parsedColor !== null ||
+          parsedSdWeight !== null || parsedSdRate !== null;
 
         if (hasAnyMetafield) {
           await updateShopifyVariantMetafieldsBulk([{
@@ -184,6 +196,8 @@ export async function POST(request) {
             shape: parsedShape,
             crt: parsedCrt,
             color: parsedColor,
+            smallDiamondWeight: parsedSdWeight,
+            smallDiamondRatePerCarat: parsedSdRate,
           }]);
         }
       }
@@ -199,10 +213,24 @@ export async function POST(request) {
         compareAtPrice: calculatedCompareAt.toString()
       }]);
       
-      // 3. Update the global Gold Rate Metafields (14K, 18K etc.)
+      // 3. Update global Gold Rate & Breakdown Metafields
       const settings = await getSettings();
       const rates = await fetchLiveGoldRates();
       await updateProductGoldRateMetafields([{ id: productId }], rates, settings).catch(console.error);
+
+      if (settings.priceBreakdownEnabled && payload.breakdown) {
+        await updateVariantBreakdownMetafields([{
+          variantId,
+          breakdown: {
+            goldRatePerGram: payload.breakdown.goldPricePerGram,
+            totalGoldValue: payload.breakdown.baseGoldCost,
+            centreStoneValue: payload.breakdown.diamondPrice,
+            smallDiamondValue: payload.breakdown.smallDiamondValue,
+            makingChargeRate: parseFloat(settings.makingChargePerGram) || 0,
+            totalMakingCharge: payload.breakdown.makingCharges,
+          }
+        }], settings).catch(console.error);
+      }
 
       await addLog({
         status: 'success',
@@ -293,14 +321,17 @@ export async function POST(request) {
           // 1. Save metafields if provided
           if (item.metafields) {
             const mf = item.metafields;
-            const parsedWeight = mf.weight !== '' ? parseFloat(mf.weight) : null;
-            const parsedKarat = mf.karat !== '' ? mf.karat : null;
-            const parsedShape = mf.shape !== '' ? mf.shape : null;
-            const parsedCrt = mf.crt !== '' ? parseFloat(mf.crt) : null;
-            const parsedColor = mf.color !== '' ? mf.color : null;
+            const parsedWeight = mf.weight !== undefined && mf.weight !== '' ? parseFloat(mf.weight) : null;
+            const parsedKarat = mf.karat !== undefined && mf.karat !== '' ? mf.karat : null;
+            const parsedShape = mf.shape !== undefined && mf.shape !== '' ? mf.shape : null;
+            const parsedCrt = mf.crt !== undefined && mf.crt !== '' ? parseFloat(mf.crt) : null;
+            const parsedColor = mf.color !== undefined && mf.color !== '' ? mf.color : null;
+            const parsedSdWeight = mf.smallDiamondWeight !== undefined && mf.smallDiamondWeight !== '' ? parseFloat(mf.smallDiamondWeight) : null;
+            const parsedSdRate = mf.smallDiamondRatePerCarat !== undefined && mf.smallDiamondRatePerCarat !== '' ? parseFloat(mf.smallDiamondRatePerCarat) : null;
 
             const hasAnyMetafield = parsedWeight !== null || parsedKarat !== null ||
-              parsedShape !== null || parsedCrt !== null || parsedColor !== null;
+              parsedShape !== null || parsedCrt !== null || parsedColor !== null ||
+              parsedSdWeight !== null || parsedSdRate !== null;
 
             if (hasAnyMetafield) {
               await updateShopifyVariantMetafieldsBulk([{
@@ -310,6 +341,8 @@ export async function POST(request) {
                 shape: parsedShape,
                 crt: parsedCrt,
                 color: parsedColor,
+                smallDiamondWeight: parsedSdWeight,
+                smallDiamondRatePerCarat: parsedSdRate,
               }]);
             }
           }
@@ -339,15 +372,32 @@ export async function POST(request) {
         }
       }
 
-      // 3. Update the global Gold Rate Metafields (14K, 18K etc.) for all unique products synced
+      // 3. Update global Gold Rate & Breakdown Metafields for all unique products synced
       try {
         const uniqueProductIds = [...new Set(items.map(item => item.productId))];
         const dummyProducts = uniqueProductIds.map(id => ({ id }));
         const settings = await getSettings();
         const rates = await fetchLiveGoldRates();
         await updateProductGoldRateMetafields(dummyProducts, rates, settings);
+
+        if (settings.priceBreakdownEnabled) {
+          const breakdownItems = items.filter(item => item.breakdown).map(item => ({
+            variantId: item.variantId,
+            breakdown: {
+              goldRatePerGram: item.breakdown.goldPricePerGram,
+              totalGoldValue: item.breakdown.baseGoldCost,
+              centreStoneValue: item.breakdown.diamondPrice,
+              smallDiamondValue: item.breakdown.smallDiamondValue,
+              makingChargeRate: parseFloat(settings.makingChargePerGram) || 0,
+              totalMakingCharge: item.breakdown.makingCharges,
+            }
+          }));
+          if (breakdownItems.length > 0) {
+            await updateVariantBreakdownMetafields(breakdownItems, settings).catch(console.error);
+          }
+        }
       } catch (err) {
-        console.error('[Bulk Sync] Failed to update product gold rate metafields:', err);
+        console.error('[Bulk Sync] Failed to update product gold rate / breakdown metafields:', err);
       }
 
       if (successCount > 0) {
