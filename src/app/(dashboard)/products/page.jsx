@@ -871,12 +871,13 @@ export default function ProductsPage() {
                                   onClick={() => handleSyncVariant(product, variant)}
                                   className={!variant.outOfSync ? "btn btn-secondary btn-small" : "btn btn-primary btn-small"}
                                   style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
-                                  disabled={syncingId === variant.id || !variant.outOfSync}
+                                  disabled={syncingId === variant.id}
+                                  title={!variant.outOfSync ? "Click to re-sync price & breakdown to Shopify" : "Sync price to Shopify"}
                                 >
                                   {syncingId === variant.id ? (
                                     <span>Syncing...</span>
                                   ) : !variant.outOfSync ? (
-                                    <span>Synced</span>
+                                    <span>Synced ✓</span>
                                   ) : (
                                     <>
                                       <span>Sync</span>

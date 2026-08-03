@@ -324,7 +324,11 @@ export async function runProductSync(isAuto = false) {
         let jsonlString = '';
         for (const pid of productIds) {
           const items = groupedByProduct[pid];
-          const variants = items.map(item => ({ id: item.variantId, price: item.newPrice.toString() }));
+          const variants = items.map(item => ({
+            id: item.variantId,
+            price: item.newPrice.toString(),
+            compareAtPrice: (item.compareAtPrice !== undefined && item.compareAtPrice !== null ? item.compareAtPrice : (parseFloat(item.newPrice) * 2)).toString()
+          }));
           jsonlString += JSON.stringify({ productId: pid, variants }) + '\n';
         }
 
@@ -354,7 +358,8 @@ export async function runProductSync(isAuto = false) {
       try {
         const priceUpdates = items.map(item => ({
           id: item.variantId,
-          price: item.newPrice.toString()
+          price: item.newPrice.toString(),
+          compareAtPrice: (item.compareAtPrice !== undefined && item.compareAtPrice !== null ? item.compareAtPrice : (parseFloat(item.newPrice) * 2)).toString()
         }));
         
         await updateShopifyVariantPricesBulk(pid, priceUpdates);
